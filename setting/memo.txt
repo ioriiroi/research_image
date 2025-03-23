@@ -1,5 +1,0 @@
-[INFO] Gen code_verifier: Te599wiHZ6t_wWQwEhWwP5c4OEB_rgqfJ36QrPNDgM0
-[INFO] Get code: Bps8iPM0JeTr4KpML8CLjN2lymClib5nJuaw4bsQFmU
-access_token: Ewp6hxTFOwmoe49vv3gB48Bo5zuCiccvIiz7IPPYnEw
-refresh_token: OnuT-ug3wcX3aoUjHBGXzbuCxzPdci60gUNxBzI2NWI
-expires_in: 3600
