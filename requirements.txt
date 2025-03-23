@@ -1,0 +1,6 @@
+requests
+bs4
+pytz
+pixivpy3
+python-dotenv
+selenium
