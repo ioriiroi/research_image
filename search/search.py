@@ -8,7 +8,8 @@ from datetime import datetime, timedelta
 from pytz import timezone
 from pixivpy3 import *
 
-import config
+import tools.config as config
+import tools.pixivGetTools as pixivGetTools
 
 UTC = timezone("UTC")
 JST = timezone("Asia/Tokyo")
@@ -31,41 +32,41 @@ def getContents(link) -> json:
 
     return contents
 
-"いいね: likeCount, ブックマーク: bookmarkCount, 閲覧: viewCount, 投稿日時: createDate (グリニッジ標準時, +9hで日本時)"
-class PixivGetTools:
-    def getLikeCount(illustData, illustId) -> int:
-        likeCount = illustData["illust"][illustId]["likeCount"]
+# "いいね: likeCount, ブックマーク: bookmarkCount, 閲覧: viewCount, 投稿日時: createDate (グリニッジ標準時, +9hで日本時)"
+# class PixivGetTools:
+#     def getLikeCount(illustData, illustId) -> int:
+#         likeCount = illustData["illust"][illustId]["likeCount"]
 
-        return int(likeCount)
+#         return int(likeCount)
 
-    def getBookmarkCount(illustData, id) -> int:
-        bookmarkCount = illustData["illust"][str(id)]["bookmarkCount"]
+#     def getBookmarkCount(illustData, id) -> int:
+#         bookmarkCount = illustData["illust"][str(id)]["bookmarkCount"]
 
-        return bookmarkCount
+#         return bookmarkCount
 
-    def getViewCount(illustData, id) -> int:
-        viewCount = illustData["illust"][str(id)]["viewCount"]
+#     def getViewCount(illustData, id) -> int:
+#         viewCount = illustData["illust"][str(id)]["viewCount"]
 
-        return viewCount
+#         return viewCount
 
-    def getAiType(illustData, id) -> int:
-        # not AI: 1, AI: 2
-        aiType = illustData["illust"][str(id)]["aiType"]
+#     def getAiType(illustData, id) -> int:
+#         # not AI: 1, AI: 2
+#         aiType = illustData["illust"][str(id)]["aiType"]
 
-        return aiType
+#         return aiType
     
-    def isIncludeTags(illustData, targetTags, id) -> bool:
-        tags = illustData["illust"][str(id)]["tags"]["tags"]
-        for tag in tags:
-            if tag["tag"] in targetTags:
-                return True
-        return False
+#     def isIncludeTags(illustData, targetTags, id) -> bool:
+#         tags = illustData["illust"][str(id)]["tags"]["tags"]
+#         for tag in tags:
+#             if tag["tag"] in targetTags:
+#                 return True
+#         return False
 
-    def isManga(illustData, id) -> bool:
-        illustType = illustData["illust"][str(id)]["illustType"]
-        if illustType == 1:
-            return True
-        return False
+#     def isManga(illustData, id) -> bool:
+#         illustType = illustData["illust"][str(id)]["illustType"]
+#         if illustType == 1:
+#             return True
+#         return False
 
 """ 指定の日付に投稿されたイラストの端を検索 """
 def searchIllustData(api, word, sort, date) -> json:
