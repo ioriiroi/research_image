@@ -8,19 +8,19 @@ from datetime import datetime, timedelta
 from pytz import timezone
 from pixivpy3 import *
 
-import tools.config as config
-import tools.pixivGetTools as pixivGetTools
-import tools.pixivApiTools as pixivApi
-import tools.jsonLoadAndWrite as jsonLoadAndWrite
+import lib.config as config
+import lib.pixivGetTools as pixivGetTools
+import lib.pixivApiTools as pixivApi
+import lib.jsonLoadAndWrite as jsonLoadAndWrite
 
 UTC = timezone("UTC")
 JST = timezone("Asia/Tokyo")
 timeFormat = "%Y-%m-%d %H:%M:%S"
 illustId = "1"
-downloadDir = "./data/image"
-illustJsonDir = "./data/illustData.json"
-searchedJsonDir = "./data/searched.json"
-maxCount = 100
+downloadDir = config.DOWNLOAD_DIR
+illustJsonDir = "../data/illustData.json"
+searchedJsonDir = "../data/searched.json"
+maxCount = 1
 sleepTime = 3
 tagsNG = ["R-18", "R-18G", "漫画", "AI生成"]
 
@@ -29,7 +29,11 @@ def getContents(link) -> json:
     time.sleep(1)
 
     soup = BeautifulSoup(r.content, "html.parser")
-    contents = soup.find_all("meta", id="meta-preload-data")[0].get("content")
+    try:
+        contents = soup.find_all("meta", id="meta-preload-data")[0].get("content")
+    except:
+        return None
+
     contents = json.loads(contents)
 
     return contents
@@ -40,37 +44,37 @@ def searchDownload(api, id, detailData):
 
     if str(id) in detailData:
         print("id {} has already been downloaded".format(id))
-        return
+        return False
 
     try:
         illustData["illust"]
     except:
         print("id {} is not found".format(id))
-        return
+        return False
 
-    if PixivGetTools.getAiType(illustData, id) == 2:
+    if pixivGetTools.getAiType(illustData, id) == 2:
         print("id {} is AI illust".format(id))
-        return
+        return False
     
-    if PixivGetTools.isManga(illustData, id):
+    if pixivGetTools.isManga(illustData, id):
         print("id {} is manga".format(id))
-        return
+        return False
 
-    if PixivGetTools.isIncludeTags(illustData, tagsNG, id):
+    if pixivGetTools.isIncludeTags(illustData, tagsNG, id):
         print("id {} include NG tags".format(id))
-        return
+        return False
 
     url = illustData["illust"][str(id)]["urls"]["original"]
 
     if url == None:
         print("id {} is sensitive illust".format(id))
-        return
+        return False
 
     api.download(url, path = downloadDir, fname = "{}.jpg".format(id))
     time.sleep(sleepTime)
 
-    bookmark = PixivGetTools.getBookmarkCount(illustData, id)
-    view = PixivGetTools.getViewCount(illustData, id)
+    bookmark = pixivGetTools.getBookmarkCount(illustData, id)
+    view = pixivGetTools.getViewCount(illustData, id)
 
     dict["id"] = id
     dict["bookmark"] = bookmark
@@ -78,6 +82,7 @@ def searchDownload(api, id, detailData):
     detailData[str(id)] = dict
 
     print("id {} is downloaded".format(id))
+    return True
 
 """ ログイン用 """
 def apiLogin() -> AppPixivAPI:
@@ -98,13 +103,19 @@ def main():
     dataMaxId = searched["id"] + 1
     
     minId = max(pixivApi.getOldIllustId(api, "", date_str), dataMaxId)
+    
+    count = 0
+    nowId = minId
 
-    # for id in range(minId, minId + maxCount):
-    #     searchDownload(api, id, detailData)
+    # 指定した分だけ保存
+    while (count < maxCount):
+        if searchDownload(api, nowId, detailData):
+            count += 1
+        nowId += 1
 
-    # saveJson(illustJsonDir, detailData)
-    # searched = {"id": minId + maxCount - 1}
-    # saveJson(searchedJsonDir, searched)
+    jsonLoadAndWrite.saveJson(illustJsonDir, detailData)
+    searched = {"id": nowId - 1}
+    jsonLoadAndWrite.saveJson(searchedJsonDir, searched)
 
     print("illusts: {} files".format(len(detailData)))
 
