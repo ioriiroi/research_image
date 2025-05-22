@@ -2,6 +2,7 @@ import requests
 import os
 import json
 import time
+import sys
 
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
@@ -20,9 +21,9 @@ illustId = "1"
 downloadDir = config.DOWNLOAD_DIR
 illustJsonDir = "../data/illustData.json"
 searchedJsonDir = "../data/searched.json"
-maxCount = 1
+maxCount = 100
 sleepTime = 3
-tagsNG = ["R-18", "R-18G", "漫画", "AI生成"]
+tagsNG = ["R-18", "R-18G", "漫画", "AI生成", "うごイラ"]
 
 def getContents(link) -> json:
     r = requests.get(link)
@@ -33,6 +34,7 @@ def getContents(link) -> json:
         contents = soup.find_all("meta", id="meta-preload-data")[0].get("content")
     except:
         return None
+    print(contents)
 
     contents = json.loads(contents)
 
@@ -40,15 +42,20 @@ def getContents(link) -> json:
 
 def searchDownload(api, id, detailData):
     dict = {}
-    illustData = getContents("https://www.pixiv.net/artworks/{}".format(id))
+    illustData = api.illust_detail(id)
+    time.sleep(1)
 
     if str(id) in detailData:
         print("id {} has already been downloaded".format(id))
         return False
-
+    
     try:
         illustData["illust"]
     except:
+        print("not found")
+        return False
+
+    if illustData["illust"]["user"]["account"] == "":
         print("id {} is not found".format(id))
         return False
 
@@ -64,9 +71,9 @@ def searchDownload(api, id, detailData):
         print("id {} include NG tags".format(id))
         return False
 
-    url = illustData["illust"][str(id)]["urls"]["original"]
+    url = illustData["illust"]["image_urls"]["large"]
 
-    if url == None:
+    if illustData["illust"]["sanity_level"] > 2:
         print("id {} is sensitive illust".format(id))
         return False
 
@@ -92,6 +99,10 @@ def apiLogin() -> AppPixivAPI:
 
 def main():
     api = apiLogin()
+    args = sys.argv
+
+    if len(args) > 1:
+        maxCount = int(args[1])
 
     # 1日前の日付を取得
     yesterday = datetime.now() - timedelta(days=1)
@@ -107,12 +118,13 @@ def main():
     count = 0
     nowId = minId
 
-    # 指定した分だけ保存
+    # 指定した枚数分だけ保存
     while (count < maxCount):
         if searchDownload(api, nowId, detailData):
             count += 1
         nowId += 1
 
+    # まとめてJSONを更新
     jsonLoadAndWrite.saveJson(illustJsonDir, detailData)
     searched = {"id": nowId - 1}
     jsonLoadAndWrite.saveJson(searchedJsonDir, searched)
