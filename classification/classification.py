@@ -15,9 +15,15 @@ from tensorflow.python.keras.models import Sequential
 from keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
 
+# --- 自作のライブラリ ---
+import model.model_normal as model_normal
+import model.model_mobilenet as model_mobilenet
+import setting.config as config
+from lib.JsonLoadAndWrite import openJson
+
 mid = 4057
 csv_path = "data.csv"
-data_dir = "image"
+data_dir = config.ILLUST_DIR
 test_dir = "testdata"
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH_SIZE = 16
@@ -65,42 +71,6 @@ def set_label(csv_path, all_image_paths):
 def change_range(image,label):
     return 2*image-1, label
 
-def model_normal():
-    model = tf.keras.Sequential([
-        tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3)),
-        #tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
-        #tf.keras.layers.MaxPooling2D(pool_size=(2, 2)),
-        #tf.keras.layers.Conv2D(128, (3, 3), activation='relu'),
-        tf.keras.layers.MaxPooling2D(pool_size=(2, 2)),
-        tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(64, activation='relu'),
-        tf.keras.layers.Dropout(0.5),
-        tf.keras.layers.Dense(2, activation='softmax')
-    ])
-
-    return model
-
-
-def model_mobilenet():
-    # MobileNet : 画像データに使われるディープラーニング手法
-    mobile_net = tf.keras.applications.MobileNetV3Large(input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3), include_top=False)
-
-    mobile_net.trainable=True
-
-    fine_tuning = 200
-
-    for layer in mobile_net.layers[:fine_tuning]:
-        layer.trainable = False
-
-    # モデルの構築
-    model = tf.keras.Sequential([
-    mobile_net,
-    tf.keras.layers.Dropout(0.5),
-    tf.keras.layers.GlobalAveragePooling2D(),
-    layers.Dense(2)
-    ])
-
-    return model
 
 def show_graph(history):
     plt.plot(history.history['accuracy'], label='accuracy')
@@ -171,7 +141,7 @@ def main():
     # (-1, 1)に正規化
     # train_ds = train_ds.map(change_range)
 
-    model = model_normal()
+    model = model_normal(IMAGE_SIZE)
 
     # モデルのコンパイル
     model.compile(optimizer=Adam(learning_rate=0.001), 

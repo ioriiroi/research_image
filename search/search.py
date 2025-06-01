@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from pytz import timezone
 from pixivpy3 import *
 
-import lib.config as config
+import setting.config as config
 import lib.pixivGetTools as pixivGetTools
 import lib.pixivApiTools as pixivApi
 import lib.jsonLoadAndWrite as jsonLoadAndWrite
@@ -25,20 +25,20 @@ maxCount = 100
 sleepTime = 3
 tagsNG = ["R-18", "R-18G", "漫画", "AI生成", "うごイラ"]
 
-def getContents(link) -> json:
-    r = requests.get(link)
-    time.sleep(1)
+# def getContents(link) -> json:
+#     r = requests.get(link)
+#     time.sleep(1)
 
-    soup = BeautifulSoup(r.content, "html.parser")
-    try:
-        contents = soup.find_all("meta", id="meta-preload-data")[0].get("content")
-    except:
-        return None
-    print(contents)
+#     soup = BeautifulSoup(r.content, "html.parser")
+#     try:
+#         contents = soup.find_all("meta", id="meta-preload-data")[0].get("content")
+#     except:
+#         return None
+#     print(contents)
 
-    contents = json.loads(contents)
+#     contents = json.loads(contents)
 
-    return contents
+#     return contents
 
 def searchDownload(api, id, detailData):
     dict = {}
