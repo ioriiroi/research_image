@@ -4,3 +4,8 @@ pytz
 pixivpy3
 python-dotenv
 selenium
+numpy
+tensorflow
+natsort
+pillow
+cv2
