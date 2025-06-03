@@ -9,10 +9,13 @@ from datetime import datetime, timedelta
 from pytz import timezone
 from pixivpy3 import *
 
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import setting.config as config
 import lib.pixivGetTools as pixivGetTools
 import lib.pixivApiTools as pixivApi
-import lib.jsonLoadAndWrite as jsonLoadAndWrite
+from src.JsonLoadAndWrite import openJson, saveJson
 
 UTC = timezone("UTC")
 JST = timezone("Asia/Tokyo")
@@ -108,8 +111,8 @@ def main():
     yesterday = datetime.now() - timedelta(days=1)
     date_str = yesterday.strftime('%Y-%m-%d')
 
-    detailData = jsonLoadAndWrite.openJson(illustJsonDir)
-    searched = jsonLoadAndWrite.openJson(searchedJsonDir)
+    detailData = openJson(illustJsonDir)
+    searched = openJson(searchedJsonDir)
 
     dataMaxId = searched["id"] + 1
     
@@ -125,9 +128,9 @@ def main():
         nowId += 1
 
     # まとめてJSONを更新
-    jsonLoadAndWrite.saveJson(illustJsonDir, detailData)
+    saveJson(illustJsonDir, detailData)
     searched = {"id": nowId - 1}
-    jsonLoadAndWrite.saveJson(searchedJsonDir, searched)
+    saveJson(searchedJsonDir, searched)
 
     print("illusts: {} files".format(len(detailData)))
 
