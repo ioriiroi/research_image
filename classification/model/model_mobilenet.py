@@ -19,9 +19,9 @@ def model_mobilenet(IMAGE_SIZE):
     # モデルの構築
     model = tf.keras.Sequential([
     mobile_net,
-    tf.keras.layers.Dropout(0.5),
+    # tf.keras.layers.Dropout(0.5),
     tf.keras.layers.GlobalAveragePooling2D(),
-    layers.Dense(2)
+    tf.keras.layers.Dense(4, activation='softmax')
     ])
 
     return model

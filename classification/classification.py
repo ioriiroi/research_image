@@ -17,19 +17,20 @@ from keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
 
 # --- 自作のライブラリ ---
-from model.model_normal import model_normal
-import model.model_mobilenet as model_mobilenet
+from model.model_normal import model_normal, model_normal_deep
+from model.model_mobilenet import model_mobilenet
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from setting import config
 from lib.SetLabel import set_label
 from src.JsonLoadAndWrite import openJson
 
-mid = 4057
-csv_path = "data.csv"
+# tf.autograph.set_verbosity(
+#     level=0, alsologtostdout=False
+# )
+
 data_dir = config.DATA_DIR
 image_dir = config.DOWNLOAD_DIR
-test_dir = "testdata"
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH_SIZE = 16
 IMAGE_SIZE = 198
@@ -46,16 +47,25 @@ def file_diff_check(image_path, data):
 def road_image_path(image_dir):
     all_image_paths = list(glob.glob("{}/*.jpg".format(image_dir))) # 画像パスを全て取得
     all_image_paths = natsorted(all_image_paths) # パスをソート
-
     return all_image_paths
 
 def preprocess_image(path):
-    image = tf.io.read_file(path)
-    image = tf.image.decode_png(image, channels=3)
-    image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
-    image /= 255.0
-
-    return image
+    try:
+        image = tf.io.read_file(path)
+        image = tf.image.decode_image(image, channels=3, expand_animations=False)
+        
+        # データ拡張を追加
+        image = tf.image.resize(image, [IMAGE_SIZE+30, IMAGE_SIZE+30])  # 余裕を持ってリサイズ
+        image = tf.image.random_crop(image, [IMAGE_SIZE, IMAGE_SIZE, 3])  # ランダムクロップ
+        image = tf.image.random_flip_left_right(image)  # 左右反転
+        image = tf.image.random_brightness(image, 0.1)  # 明るさをランダムに変更
+        image = tf.image.random_contrast(image, 0.8, 1.2)  # コントラストをランダムに変更
+        
+        image = tf.cast(image, tf.float32) / 255.0
+        return image
+    except Exception as e:
+        tf.print("画像処理エラー:", path)
+        return tf.zeros([IMAGE_SIZE, IMAGE_SIZE, 3], dtype=tf.float32)
 
 # def preprocess_image(path):
 #     try:
@@ -112,7 +122,6 @@ def load_csv(csv_path):
 def change_range(image,label):
     return 2*image-1, label
 
-
 def show_graph(history):
     plt.plot(history.history['accuracy'], label='accuracy')
     plt.plot(history.history['val_accuracy'], label = 'val_accuracy')
@@ -141,28 +150,8 @@ def main():
 
     ds_image_label = tf.data.Dataset.zip((ds_image, ds_labels))
 
-    
-    # """ 簡易的なテストケース """
-    # test_image_paths = list(glob.glob("{}/*/*.jpeg".format(test_dir)))
-    # test_image_paths = natsorted(test_image_paths)
-    # test_image = tf.data.Dataset.from_tensor_slices(test_image_paths)
-    # ds_test_image = test_image.map(preprocess_image)
-
-    # test_label = []
-
-    # for path in test_image_paths:
-    #     path = os.path.split(path)[0]
-    #     test_label.append(int(path[-1]))
-
-    # ds_test_labels = tf.data.Dataset.from_tensor_slices(tf.cast(test_label, tf.int64))
-    # test_image_label = tf.data.Dataset.zip((ds_test_image, ds_test_labels))
-
-    # test_image_label = test_image_label.batch(BATCH_SIZE)
-    # test_image_label = test_image_label.prefetch(buffer_size=AUTOTUNE)
-
-
     # 3. データをシャッフル
-    ds_shuffled = ds_image_label.shuffle(buffer_size=1000, seed=42)
+    ds_shuffled = ds_image_label.shuffle(buffer_size=1000, seed=42, reshuffle_each_iteration=False)
     
     # 4. データセットの総数を確認
     dataset_size = tf.data.experimental.cardinality(ds_shuffled).numpy()
@@ -175,9 +164,9 @@ def main():
     train_size = dataset_size - test_size - val_size  # 残りを訓練用
     
     # 6. データセットを分割
-    test_ds = ds_shuffled.take(test_size)  # テストデータを取得
+    test_ds = ds_shuffled.take(test_size).shuffle(test_size)  # テストデータを取得
     remaining_ds = ds_shuffled.skip(test_size)  # 残りのデータ
-    val_ds = remaining_ds.take(val_size)  # 検証データを取得
+    val_ds = remaining_ds.take(val_size).shuffle(val_size)  # 検証データを取得
     train_ds = remaining_ds.skip(val_size)  # 訓練データを取得
     
     # 7. データセットサイズを確認
@@ -194,22 +183,49 @@ def main():
     train_ds = train_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
     val_ds = val_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
     test_ds = test_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
-    
 
-    # # (-1, 1)に正規化
-    # # train_ds = train_ds.map(change_range)
+    model = model_normal_deep(IMAGE_SIZE, 4)
+    # model = model_mobilenet(IMAGE_SIZE)
 
-    model = model_normal(IMAGE_SIZE)
+    # 学習率スケジューラーの追加
+    lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=5,
+        min_lr=1e-6,
+        verbose=1
+    )
+
+    # モデルチェックポイントの追加
+    # checkpoint = tf.keras.callbacks.ModelCheckpoint(
+    #     'best_model.h5',
+    #     monitor='val_accuracy',
+    #     save_best_only=True,
+    #     mode='max',
+    #     verbose=1
+    # )
 
     # モデルのコンパイル
-    model.compile(optimizer=Adam(learning_rate=0.001), 
-            loss='sparse_categorical_crossentropy',
-            metrics=["accuracy"])
+    model.compile(
+        optimizer=Adam(learning_rate=0.001, weight_decay=1e-5),  # L2正則化を追加
+        loss='sparse_categorical_crossentropy',
+        metrics=["accuracy"]
+    )
     
-    history = model.fit(train_ds, validation_data=val_ds, epochs=100, steps_per_epoch=train_ds_size // BATCH_SIZE,
-              verbose=True,
-                callbacks=[keras.callbacks.EarlyStopping(monitor='val_loss',
-                            min_delta=0, patience=10,verbose=1)])
+    history = model.fit(
+        train_ds, 
+        validation_data=val_ds, 
+        epochs=100,
+        verbose=True,
+        callbacks=[
+            keras.callbacks.EarlyStopping(
+                monitor='val_loss',
+                patience=15,  # より長い忍耐値
+                verbose=1
+            ),
+            lr_scheduler
+        ]
+    )
 
     show_graph(history)
 
