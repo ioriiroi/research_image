@@ -1,0 +1,92 @@
+2層 dropoutなし
+test accuracy: 0.375
+test loss: 1.4979398250579834
+
+2層 クラスバランス追加
+test accuracy: 0.375
+test loss: 1.3241136074066162
+
+2層 画像拡張の追加
+test accuracy: 0.5
+test loss: 1.2342150211334229
+
+1層
+test accuracy: 0.375
+test loss: 1.2302926778793335
+
+1層 クラスバランス追加
+test accuracy: 0.5
+test loss: 1.113538146018982
+
+1層 画像拡張の追加
+test accuracy: 0.375
+test loss: 1.652808427810669
+
+1層 重み緩やか
+クラス 0 の重み: 1.04
+クラス 1 の重み: 0.83
+クラス 2 の重み: 1.04
+クラス 3 の重み: 1.21
+test accuracy: 0.25
+test loss: 1.5074690580368042
+
+3層 
+test accuracy: 0.25
+test loss: 1.388242244720459
+
+deep2
+test accuracy: 0.4375
+test loss: 1.9665676355361938
+
+deep2 重み調整　クラスバランス追加
+test accuracy: 0.1875
+test loss: 2.6663994789123535
+
+simple
+test accuracy: 0.3125
+test loss: 1.430060625076294
+
+simple クラスバランス追加
+クラス 0 の重み: 1.04
+クラス 1 の重み: 0.83
+クラス 2 の重み: 1.04
+クラス 3 の重み: 1.21
+test accuracy: 0.4375
+test loss: 1.376495599746704
+
+simple batchsize4
+test accuracy: 0.375
+test loss: 1.3601341247558594
+
+simple 画像拡張の追加
+test accuracy: 0.625
+test loss: 1.2788738012313843
+
+balanced クラスバランス追加
+クラス 0 の重み: 1.04
+クラス 1 の重み: 0.83
+クラス 2 の重み: 1.04
+クラス 3 の重み: 1.21
+test accuracy: 0.375
+test loss: 1.3509893417358398
+
+balanced 画像拡張の追加
+test accuracy: 0.625
+test loss: 1.3407400846481323
+
+deep_with_regular
+test accuracy: 0.5
+test loss: 1.5366737842559814
+
+deep_with_regular 
+スケジューラの変更
+test accuracy: 0.4126213490962982
+test loss: 1.7156676054000854
+バッチサイズ16
+test accuracy: 0.4375
+test loss: 1.5702717304229736
+バッチサイズ4
+test accuracy: 0.5
+test loss: 1.6708334684371948
+
+

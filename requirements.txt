@@ -11,3 +11,5 @@ pillow
 matplotlib
 opencv-contrib-python
 scikit-learn
+albumentations
+seaborn
