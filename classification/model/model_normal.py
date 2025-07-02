@@ -120,26 +120,27 @@ def model_balanced(IMAGE_SIZE, num_classes):
 
 def model_deep_with_regularization(IMAGE_SIZE, num_classes):
     """正則化を強化した深いモデル"""
+    l2_num = 0.005
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(IMAGE_SIZE, IMAGE_SIZE, 3)),
         
         # 1層目
         tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same',
-                              kernel_regularizer=tf.keras.regularizers.l2(0.0005)),
+                              kernel_regularizer=tf.keras.regularizers.l2(l2_num)),
         tf.keras.layers.BatchNormalization(),
         tf.keras.layers.MaxPooling2D((2, 2)),
         tf.keras.layers.Dropout(0.3),
         
         # 2層目
         tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same',
-                              kernel_regularizer=tf.keras.regularizers.l2(0.0005)),
+                              kernel_regularizer=tf.keras.regularizers.l2(l2_num)),
         tf.keras.layers.BatchNormalization(),
         tf.keras.layers.MaxPooling2D((2, 2)),
         tf.keras.layers.Dropout(0.3),
         
         # 3層目
         tf.keras.layers.Conv2D(128, (3, 3), activation='relu', padding='same',
-                              kernel_regularizer=tf.keras.regularizers.l2(0.0005)),
+                              kernel_regularizer=tf.keras.regularizers.l2(l2_num)),
         tf.keras.layers.BatchNormalization(),
         tf.keras.layers.MaxPooling2D((2, 2)),
         tf.keras.layers.Dropout(0.3),

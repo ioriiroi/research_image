@@ -1,9 +1,9 @@
 def split_label(bookmark):
     if bookmark < 3:
         return 0
-    elif 3 <= bookmark < 20:
+    elif 3 <= bookmark < 10:
         return 1
-    elif 20 <= bookmark < 150:
+    elif 10 <= bookmark < 100:
         return 2
     else:
         return 3

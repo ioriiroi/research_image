@@ -32,7 +32,7 @@ tf.get_logger().setLevel('ERROR')
 data_dir = config.DATA_DIR
 image_dir = config.DOWNLOAD_DIR
 AUTOTUNE = tf.data.AUTOTUNE
-BATCH_SIZE = 8
+BATCH_SIZE = 16
 IMAGE_SIZE = 198
 
 
@@ -199,7 +199,7 @@ def safe_decode_image(image_bytes):
                 # すべて失敗した場合はエラーを発生
                 raise ValueError("画像のデコードに失敗しました")
 
-def robust_preprocess(path, label, augment=False):
+def robust_preprocess(path, label, augment):
     """さらに強化したエラーハンドリングを持つ前処理関数"""
     try:
         # ファイルの読み込み
@@ -388,7 +388,7 @@ def main():
     val_ds = val_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
     test_ds = test_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
 
-    model = model_deep_with_regularization(IMAGE_SIZE, 4)
+    model = model_normal_deep(IMAGE_SIZE, 4)
     # model = model_mobilenet(IMAGE_SIZE)
 
     # 学習率スケジューラーの追加
@@ -426,7 +426,7 @@ def main():
         callbacks=[
             keras.callbacks.EarlyStopping(
                 monitor='val_loss',
-                patience=10,  # より長い忍耐値
+                patience=10,
                 verbose=1
             )
         ]

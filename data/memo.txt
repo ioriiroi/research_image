@@ -70,9 +70,10 @@ balanced クラスバランス追加
 test accuracy: 0.375
 test loss: 1.3509893417358398
 
-balanced 画像拡張の追加
-test accuracy: 0.625
-test loss: 1.3407400846481323
+balanced　浅い? 使わないほうが良い
+test accuracy: 0.3543689250946045
+test loss: 1.3754340410232544
+予想がほぼ2だった
 
 deep_with_regular
 test accuracy: 0.5
@@ -86,7 +87,39 @@ test loss: 1.7156676054000854
 test accuracy: 0.4375
 test loss: 1.5702717304229736
 バッチサイズ4
-test accuracy: 0.5
-test loss: 1.6708334684371948
+test accuracy: 0.3300970792770386
+test loss: 1.7819221019744873
+
+2層batch8
+test accuracy: 0.30582523345947266
+test loss: 1.4674745798110962
+3層batch16 l2=0.0005
+test accuracy: 0.34951457381248474
+test loss: 1.4296138286590576
+3層batch16 l2=0.005
+test accuracy: 0.3203883469104767
+test loss: 1.4863755702972412
+正規化を強くするとデータがちゃんと散る
+3層batch16 l2=0.001
+test accuracy: 0.34951457381248474
+test loss: 1.4826252460479736
+正規化強すぎ?
 
 
+自分の正解率
+predict actual
+2 1 x
+1 3 x
+3 3 o
+0 1 x
+2 3 x
+0 1 x
+3 3 o
+0 2 x
+2 1 x
+3 3 o
+
+正解率: 3/10
+二値分類的: 6/10
+
+正規化があると予想散らばらない
