@@ -22,18 +22,24 @@ from model.model_mobilenet import model_mobilenet
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from setting import config
-from lib.SetLabel import set_label
+from lib.SetLabel import set_label, set_label_devide2
 from src.JsonLoadAndWrite import openJson
 
 # 警告を非表示にする
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # 0=全て, 1=INFO以外, 2=WARNING以外, 3=ERROR以外
 tf.get_logger().setLevel('ERROR')
 
+# Check for TensorFlow GPU access
+print(f"TensorFlow has access to the following devices:\n{tf.config.list_physical_devices()}")
+# See TensorFlow version
+print(f"TensorFlow version: {tf.__version__}")
+
 data_dir = config.DATA_DIR
 image_dir = config.DOWNLOAD_DIR
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH_SIZE = 16
-IMAGE_SIZE = 198
+IMAGE_SIZE = 256
+CLASS_NUM = 4
 
 
 def file_diff_check(image_path, data):
@@ -118,25 +124,111 @@ def calculate_balanced_weights(labels):
     
     return class_weights
 
-def apply_augmentation(image, label, pattern=0):
+def resize_with_aspect_ratio(image, target_size):
+    """アスペクト比を保持しながらリサイズし、パディングで正方形にする"""
+    # 現在の画像サイズを取得
+    original_height = tf.cast(tf.shape(image)[0], tf.float32)
+    original_width = tf.cast(tf.shape(image)[1], tf.float32)
+    
+    # アスペクト比を計算
+    aspect_ratio = original_width / original_height
+    target_size_float = tf.cast(target_size, tf.float32)
+    
+    # 新しいサイズを計算（アスペクト比を保持）
+    if aspect_ratio > 1.0:
+        # 横長の場合
+        new_width = target_size_float
+        new_height = target_size_float / aspect_ratio
+    else:
+        # 縦長または正方形の場合
+        new_height = target_size_float
+        new_width = target_size_float * aspect_ratio
+    
+    # 整数に変換
+    new_height = tf.cast(new_height, tf.int32)
+    new_width = tf.cast(new_width, tf.int32)
+    
+    # アスペクト比を保持してリサイズ
+    image = tf.image.resize(image, [new_height, new_width])
+    
+    # 正方形になるようにパディング
+    # パディング量を計算
+    pad_height = target_size - new_height
+    pad_width = target_size - new_width
+    
+    # 上下左右に均等にパディング
+    pad_top = pad_height // 2
+    pad_bottom = pad_height - pad_top
+    pad_left = pad_width // 2
+    pad_right = pad_width - pad_left
+    
+    # パディングを適用（黒で埋める）
+    image = tf.pad(image, [[pad_top, pad_bottom], [pad_left, pad_right], [0, 0]], 
+                   mode='CONSTANT', constant_values=0)
+    
+    return image
+
+def resize_with_aspect_ratio_white_padding(image, target_size):
+    """アスペクト比を保持しながらリサイズし、白いパディングで正方形にする"""
+    # 現在の画像サイズを取得
+    original_height = tf.cast(tf.shape(image)[0], tf.float32)
+    original_width = tf.cast(tf.shape(image)[1], tf.float32)
+    
+    # アスペクト比を計算
+    aspect_ratio = original_width / original_height
+    target_size_float = tf.cast(target_size, tf.float32)
+    
+    # 新しいサイズを計算（アスペクト比を保持）
+    if aspect_ratio > 1.0:
+        # 横長の場合
+        new_width = target_size_float
+        new_height = target_size_float / aspect_ratio
+    else:
+        # 縦長または正方形の場合
+        new_height = target_size_float
+        new_width = target_size_float * aspect_ratio
+    
+    # 整数に変換
+    new_height = tf.cast(new_height, tf.int32)
+    new_width = tf.cast(new_width, tf.int32)
+    
+    # アスペクト比を保持してリサイズ
+    image = tf.image.resize(image, [new_height, new_width])
+    
+    # 正方形になるようにパディング
+    # パディング量を計算
+    pad_height = target_size - new_height
+    pad_width = target_size - new_width
+    
+    # 上下左右に均等にパディング
+    pad_top = pad_height // 2
+    pad_bottom = pad_height - pad_top
+    pad_left = pad_width // 2
+    pad_right = pad_width - pad_left
+    
+    # パディングを適用（白で埋める）
+    image = tf.pad(image, [[pad_top, pad_bottom], [pad_left, pad_right], [0, 0]], 
+                   mode='CONSTANT', constant_values=255)  # 白で埋める
+    
+    return image
+
+def apply_augmentation(image, label, pattern):
     """
     複数の拡張パターンを適用する関数
     pattern: 適用する拡張パターンの番号（0-4）
     """
     # 基本のリサイズ（すべてのパターンに適用）
-    image = tf.image.resize(image, [IMAGE_SIZE+30, IMAGE_SIZE+30])
+    image = resize_with_aspect_ratio(image, IMAGE_SIZE)
     
     # パターン別の拡張処理
     if pattern == 0:
         # パターン1: 基本的な拡張
-        image = tf.image.random_crop(image, [IMAGE_SIZE, IMAGE_SIZE, 3])
         image = tf.image.random_flip_left_right(image)
         image = tf.image.random_brightness(image, 0.1)
         image = tf.image.random_contrast(image, 0.8, 1.2)
     
     elif pattern == 1:
         # パターン2: 色調変更に重点
-        image = tf.image.random_crop(image, [IMAGE_SIZE, IMAGE_SIZE, 3])
         image = tf.image.random_hue(image, 0.2)
         image = tf.image.random_saturation(image, 0.6, 1.6)
         image = tf.image.random_brightness(image, 0.2)
@@ -161,7 +253,6 @@ def apply_augmentation(image, label, pattern=0):
     
     elif pattern == 3:
         # パターン4: 明るさ・コントラスト変化に重点
-        image = tf.image.random_crop(image, [IMAGE_SIZE, IMAGE_SIZE, 3])
         image = tf.image.random_brightness(image, 0.3)
         image = tf.image.random_contrast(image, 0.6, 1.4)
         
@@ -173,7 +264,14 @@ def apply_augmentation(image, label, pattern=0):
         image = tf.image.resize(image_small, [IMAGE_SIZE, IMAGE_SIZE])
         image = tf.image.random_hue(image, 0.3)
         image = tf.image.random_saturation(image, 0.5, 1.5)
-    
+    elif pattern == 5:
+        """穏やかなデータ拡張"""
+        # より控えめな拡張
+        image = tf.image.random_flip_left_right(image)
+        image = tf.image.random_contrast(image, 0.8, 1.2)
+        # 軽微な明度調整のみ
+        image = tf.image.random_brightness(image, 0.3)  # 0.3から0.05に削減
+        
     # 正規化（すべてのパターンに適用）
     image = tf.cast(image, tf.float32) / 255.0
     
@@ -200,7 +298,7 @@ def safe_decode_image(image_bytes):
                 raise ValueError("画像のデコードに失敗しました")
 
 def robust_preprocess(path, label, augment):
-    """さらに強化したエラーハンドリングを持つ前処理関数"""
+    """アスペクト比を保持した前処理関数"""
     try:
         # ファイルの読み込み
         file_content = tf.io.read_file(path)
@@ -236,13 +334,12 @@ def robust_preprocess(path, label, augment):
             lambda: tf.zeros([IMAGE_SIZE, IMAGE_SIZE, 3], dtype=image.dtype)
         )
         
-        # リサイズ - 常に固定サイズにする
-        image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
+        # アスペクト比を保持したリサイズ
+        image = resize_with_aspect_ratio(image, IMAGE_SIZE)
         
         # 拡張を適用（トレーニングデータのみ）
         if augment:
-            # ランダムに拡張パターンを選択
-            pattern = tf.random.uniform([], minval=0, maxval=5, dtype=tf.int32)
+            pattern = 0
             image, label = apply_augmentation(image, label, pattern)
         else:
             # 拡張なしの場合は単純に正規化
@@ -348,7 +445,7 @@ def main():
     # 5. データを分割比率を設定
     # テスト:検証:訓練 = 2:1:7 の比率
     test_size = int(dataset_size * 0.2)  # 20%をテスト用
-    val_size = int(dataset_size * 0.1)   # 10%を検証用
+    val_size = int(dataset_size * 0.3)   # 10%を検証用
     train_size = dataset_size - test_size - val_size  # 残りを訓練用
     
     # 6. データセットを分割（パスとラベルのペアを分割）
@@ -388,7 +485,7 @@ def main():
     val_ds = val_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
     test_ds = test_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
 
-    model = model_normal_deep(IMAGE_SIZE, 4)
+    model = model_normal_deep(IMAGE_SIZE, CLASS_NUM)
     # model = model_mobilenet(IMAGE_SIZE)
 
     # 学習率スケジューラーの追加
