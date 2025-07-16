@@ -120,7 +120,7 @@ def model_balanced(IMAGE_SIZE, num_classes):
 
 def model_deep_with_regularization(IMAGE_SIZE, num_classes):
     """正則化を強化した深いモデル"""
-    l2_num = 0.005
+    l2_num = 0.0005
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(IMAGE_SIZE, IMAGE_SIZE, 3)),
         

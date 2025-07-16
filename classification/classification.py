@@ -22,7 +22,7 @@ from model.model_mobilenet import model_mobilenet
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from setting import config
-from lib.SetLabel import set_label, set_label_devide2
+from lib.SetLabel import set_label, set_label_devide2, set_label_interval
 from src.JsonLoadAndWrite import openJson
 
 # 警告を非表示にする
@@ -34,12 +34,11 @@ print(f"TensorFlow has access to the following devices:\n{tf.config.list_physica
 # See TensorFlow version
 print(f"TensorFlow version: {tf.__version__}")
 
-data_dir = config.DATA_DIR
-image_dir = config.DOWNLOAD_DIR
+data_dir = config.MIKU_DATA_DIR
+image_dir = config.ILLUST_MIKU_DIR
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH_SIZE = 16
 IMAGE_SIZE = 256
-CLASS_NUM = 4
 
 
 def file_diff_check(image_path, data):
@@ -212,6 +211,52 @@ def resize_with_aspect_ratio_white_padding(image, target_size):
     
     return image
 
+def simple_rotation_augmentation(image, min_angle, max_angle):
+    """
+    シンプルな回転拡張（tf.py_functionを使用）
+    """
+    def rotate_image(img, angle):
+        # NumPyとPILを使用した回転
+        from PIL import Image
+        import numpy as np
+        
+        # TensorFlowテンソルをNumPy配列に変換
+        img_np = img.numpy()
+        
+        # uint8に変換（PILで処理するため）
+        if img_np.dtype == np.float32:
+            img_np = (img_np * 255).astype(np.uint8)
+        
+        # PIL Imageに変換
+        pil_img = Image.fromarray(img_np)
+        
+        # 回転
+        rotated_pil = pil_img.rotate(angle, fillcolor=(0, 0, 0), expand=False)
+        
+        # NumPy配列に戻す
+        rotated_np = np.array(rotated_pil)
+        
+        # float32に正規化
+        if img.dtype == tf.float32:
+            rotated_np = rotated_np.astype(np.float32) / 255.0
+        
+        return rotated_np
+    
+    # ランダムな角度を生成
+    angle = tf.random.uniform([], min_angle, max_angle)
+    
+    # tf.py_functionを使用してPython関数を呼び出し
+    rotated_image = tf.py_function(
+        lambda img, ang: rotate_image(img, ang),
+        [image, angle],
+        tf.float32
+    )
+    
+    # 形状を明示的に設定
+    rotated_image.set_shape(image.shape)
+    
+    return rotated_image
+
 def apply_augmentation(image, label, pattern):
     """
     複数の拡張パターンを適用する関数
@@ -224,22 +269,20 @@ def apply_augmentation(image, label, pattern):
     if pattern == 0:
         # パターン1: 基本的な拡張
         image = tf.image.random_flip_left_right(image)
-        image = tf.image.random_brightness(image, 0.1)
+        image = tf.image.random_brightness(image, 0.5)
         image = tf.image.random_contrast(image, 0.8, 1.2)
-    
-    elif pattern == 1:
-        # パターン2: 色調変更に重点
-        image = tf.image.random_hue(image, 0.2)
-        image = tf.image.random_saturation(image, 0.6, 1.6)
-        image = tf.image.random_brightness(image, 0.2)
-        image = tf.image.random_contrast(image, 0.7, 1.3)
-    
-    elif pattern == 2:
-        # パターン3: ジオメトリ変換に重点（回転なしバージョン）
-        # 90度単位の回転（TensorFlowの標準機能）
-        k = tf.random.uniform([], minval=0, maxval=4, dtype=tf.int32)
-        image = tf.image.rot90(image, k=k)
         
+    elif pattern == 1:
+        # パターン5: ぼかしと強い色調変更
+        image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
+        # ガウスぼかしの代わりにダウンサンプリングとアップサンプリング
+        image_small = tf.image.resize(image, [IMAGE_SIZE // 2, IMAGE_SIZE // 2])
+        image = tf.image.resize(image_small, [IMAGE_SIZE, IMAGE_SIZE])
+        # image = tf.image.random_hue(image, 0.5)
+        # image = tf.image.random_saturation(image, 0.8, 1.2)
+    elif pattern == 2:
+        # パターン7: ランダム回転拡張
+        image = simple_rotation_augmentation(image, min_angle=-45, max_angle=45)
         # パディングとクロップでランダムシフト効果を出す
         padded = tf.pad(image, [[10, 10], [10, 10], [0, 0]], mode='REFLECT')
         offset_h = tf.random.uniform([], maxval=20, dtype=tf.int32)
@@ -247,30 +290,7 @@ def apply_augmentation(image, label, pattern):
         image = tf.image.crop_to_bounding_box(
             padded, offset_h, offset_w, IMAGE_SIZE, IMAGE_SIZE
         )
-        
         image = tf.image.random_flip_left_right(image)
-        image = tf.image.random_flip_up_down(image)
-    
-    elif pattern == 3:
-        # パターン4: 明るさ・コントラスト変化に重点
-        image = tf.image.random_brightness(image, 0.3)
-        image = tf.image.random_contrast(image, 0.6, 1.4)
-        
-    elif pattern == 4:
-        # パターン5: ぼかしと強い色調変更
-        image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
-        # ガウスぼかしの代わりにダウンサンプリングとアップサンプリング
-        image_small = tf.image.resize(image, [IMAGE_SIZE // 2, IMAGE_SIZE // 2])
-        image = tf.image.resize(image_small, [IMAGE_SIZE, IMAGE_SIZE])
-        image = tf.image.random_hue(image, 0.3)
-        image = tf.image.random_saturation(image, 0.5, 1.5)
-    elif pattern == 5:
-        """穏やかなデータ拡張"""
-        # より控えめな拡張
-        image = tf.image.random_flip_left_right(image)
-        image = tf.image.random_contrast(image, 0.8, 1.2)
-        # 軽微な明度調整のみ
-        image = tf.image.random_brightness(image, 0.3)  # 0.3から0.05に削減
         
     # 正規化（すべてのパターンに適用）
     image = tf.cast(image, tf.float32) / 255.0
@@ -339,7 +359,7 @@ def robust_preprocess(path, label, augment):
         
         # 拡張を適用（トレーニングデータのみ）
         if augment:
-            pattern = 0
+            pattern = tf.random.uniform([], minval=0, maxval=3, dtype=tf.int32)
             image, label = apply_augmentation(image, label, pattern)
         else:
             # 拡張なしの場合は単純に正規化
@@ -428,7 +448,7 @@ def main():
     # 1. 画像パスとラベルを取得
     all_image_paths = road_image_path(image_dir)
     data_json = openJson(data_dir)
-    all_image_labels = set_label(data_json)
+    all_image_labels, CLASS_NUM = set_label_devide2(data_json)
     
     # 2. パスとラベルのデータセットを作成（まだ画像は読み込まない）
     ds_path = tf.data.Dataset.from_tensor_slices(all_image_paths)
@@ -445,7 +465,7 @@ def main():
     # 5. データを分割比率を設定
     # テスト:検証:訓練 = 2:1:7 の比率
     test_size = int(dataset_size * 0.2)  # 20%をテスト用
-    val_size = int(dataset_size * 0.3)   # 10%を検証用
+    val_size = int(dataset_size * 0.1)   # 10%を検証用
     train_size = dataset_size - test_size - val_size  # 残りを訓練用
     
     # 6. データセットを分割（パスとラベルのペアを分割）
@@ -485,7 +505,7 @@ def main():
     val_ds = val_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
     test_ds = test_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
 
-    model = model_normal_deep(IMAGE_SIZE, CLASS_NUM)
+    model = model_deep_with_regularization(IMAGE_SIZE, CLASS_NUM)
     # model = model_mobilenet(IMAGE_SIZE)
 
     # 学習率スケジューラーの追加
@@ -497,12 +517,11 @@ def main():
     #     verbose=1
     # )
 
-    lr_scheduler = tf.keras.optimizers.schedules.CosineDecayRestarts(
+    lr_scheduler = tf.keras.optimizers.schedules.ExponentialDecay(
         initial_learning_rate=0.001,
-        first_decay_steps=10,
-        t_mul=2.0,
-        m_mul=0.9,
-        alpha=1e-5
+        decay_steps=100,
+        decay_rate=0.96,
+        staircase=False
     )
 
     class_weights = calculate_balanced_weights(all_image_labels)
@@ -516,7 +535,7 @@ def main():
     
     history = model.fit(
         train_ds, 
-        validation_data=val_ds, 
+        validation_data=val_ds,
         epochs=100,
         class_weight=class_weights,
         verbose=True,
