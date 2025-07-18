@@ -10,15 +10,13 @@ import sys
 
 from natsort import natsorted
 from tensorflow import keras
-from tensorflow.python.keras import layers
-from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
-from tensorflow.python.keras.models import Sequential
 from keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
 
 # --- 自作のライブラリ ---
 from model.model_normal import model_normal, model_normal_deep, model_normal_deep2, model_simple, model_balanced, model_deep_with_regularization
 from model.model_mobilenet import model_mobilenet
+from model.model_VGG16 import model_VGG16
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from setting import config
@@ -34,11 +32,11 @@ print(f"TensorFlow has access to the following devices:\n{tf.config.list_physica
 # See TensorFlow version
 print(f"TensorFlow version: {tf.__version__}")
 
-data_dir = config.MIKU_DATA_DIR
-image_dir = config.ILLUST_MIKU_DIR
+data_dir = config.DATA_DIR
+image_dir = config.ILLUST_DIR
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH_SIZE = 16
-IMAGE_SIZE = 256
+IMAGE_SIZE = 224
 
 
 def file_diff_check(image_path, data):
@@ -318,61 +316,18 @@ def safe_decode_image(image_bytes):
                 raise ValueError("画像のデコードに失敗しました")
 
 def robust_preprocess(path, label, augment):
-    """アスペクト比を保持した前処理関数"""
     try:
-        # ファイルの読み込み
-        file_content = tf.io.read_file(path)
-        
-        # ファイルが空でないか確認
-        file_size = tf.strings.length(file_content)
-        if file_size == 0:
-            tf.print("警告: 空のファイル", path)
-            return tf.zeros([IMAGE_SIZE, IMAGE_SIZE, 3], dtype=tf.float32), label
-        
-        # 複数のデコード方法を試す
-        try:
-            image = safe_decode_image(file_content)
-        except:
-            tf.print("画像デコードエラー:", path)
-            return tf.zeros([IMAGE_SIZE, IMAGE_SIZE, 3], dtype=tf.float32), label
-        
-        # 形状の確認と修正
-        image_shape = tf.shape(image)
-        height = image_shape[0]
-        width = image_shape[1]
-        
-        # 無効な形状をチェック
-        valid_shape = tf.logical_and(
-            tf.greater(height, 0),
-            tf.greater(width, 0)
-        )
-        
-        # 無効な形状の場合は黒い画像を返す
-        image = tf.cond(
-            valid_shape,
-            lambda: tf.identity(image),
-            lambda: tf.zeros([IMAGE_SIZE, IMAGE_SIZE, 3], dtype=image.dtype)
-        )
-        
-        # アスペクト比を保持したリサイズ
-        image = resize_with_aspect_ratio(image, IMAGE_SIZE)
-        
-        # 拡張を適用（トレーニングデータのみ）
+        image = tf.io.read_file(path)
+        image = tf.image.decode_image(image, channels=3, expand_animations=False)
+        image.set_shape([None, None, 3])
+        image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
         if augment:
-            pattern = tf.random.uniform([], minval=0, maxval=3, dtype=tf.int32)
-            image, label = apply_augmentation(image, label, pattern)
-        else:
-            # 拡張なしの場合は単純に正規化
-            image = tf.cast(image, tf.float32) / 255.0
-        
-        # 最終的な形状チェック - 必ず正しい形状を持つことを保証
+            image = tf.image.random_flip_left_right(image)
+        image = tf.cast(image, tf.float32) / 255.0
         image = tf.ensure_shape(image, [IMAGE_SIZE, IMAGE_SIZE, 3])
-        
         return image, label
-        
     except Exception as e:
-        tf.print("画像処理エラー:", e)
-        # エラーの場合は黒い画像を返す
+        tf.print("処理エラー:", path)
         return tf.zeros([IMAGE_SIZE, IMAGE_SIZE, 3], dtype=tf.float32), label
 """"""
 
@@ -444,14 +399,28 @@ def visualize_confusion_matrix(model, test_ds, class_names=None):
     plt.tight_layout()
     plt.show()
 
-def main():   
+def main():
+    print(BATCH_SIZE)
     # 1. 画像パスとラベルを取得
     all_image_paths = road_image_path(image_dir)
     data_json = openJson(data_dir)
-    all_image_labels, CLASS_NUM = set_label_devide2(data_json)
+
+    # 画像ファイル名（拡張子なし）のリストを作成
+    image_names = set(os.path.splitext(os.path.basename(p))[0] for p in all_image_paths)
+    image_paths = []
+    bookmarks = []
+    for id in data_json:
+        if id in image_names:
+            image_paths.append(f"{image_dir}/{id}.jpg")
+            bookmarks.append(data_json[id]["bookmark"])
+
+    image_paths, all_image_labels, CLASS_NUM = set_label_devide2(image_paths, bookmarks)
+    # print(len(image_paths), len(all_image_labels))
+    # for image, label in zip(image_paths, all_image_labels):
+    #     print(image, label)
     
     # 2. パスとラベルのデータセットを作成（まだ画像は読み込まない）
-    ds_path = tf.data.Dataset.from_tensor_slices(all_image_paths)
+    ds_path = tf.data.Dataset.from_tensor_slices(image_paths)
     ds_labels = tf.data.Dataset.from_tensor_slices(tf.cast(all_image_labels, tf.int64))
     ds_path_label = tf.data.Dataset.zip((ds_path, ds_labels))
 
@@ -501,9 +470,13 @@ def main():
     print(f"合計: {train_ds_size + val_ds_size + test_ds_size}")
     
     # 8. バッチ処理とプリフェッチの設定
-    train_ds = train_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
-    val_ds = val_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
-    test_ds = test_ds.batch(BATCH_SIZE).prefetch(buffer_size=AUTOTUNE)
+    train_ds = train_ds.batch(BATCH_SIZE, drop_remainder=True).prefetch(buffer_size=AUTOTUNE)
+    val_ds = val_ds.batch(BATCH_SIZE, drop_remainder=True).prefetch(buffer_size=AUTOTUNE)
+    test_ds = test_ds.batch(BATCH_SIZE, drop_remainder=True).prefetch(buffer_size=AUTOTUNE)
+
+    for images, labels in train_ds.take(1):
+        print("images.shape:", images.shape)  # (BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, 3)
+        print("labels.shape:", labels.shape)  # (BATCH_SIZE,)
 
     model = model_deep_with_regularization(IMAGE_SIZE, CLASS_NUM)
     # model = model_mobilenet(IMAGE_SIZE)
@@ -525,28 +498,47 @@ def main():
     )
 
     class_weights = calculate_balanced_weights(all_image_labels)
+    model.summary()
 
     # モデルのコンパイル
     model.compile(
         optimizer=Adam(learning_rate=lr_scheduler),
-        loss='sparse_categorical_crossentropy',
+        loss=tf.keras.losses.SparseCategoricalCrossentropy(),
         metrics=["accuracy"]
     )
+
+    for images, labels in train_ds.take(1):
+        print("train images.shape:", images.shape)
+    for images, labels in val_ds.take(1):
+        print("val images.shape:", images.shape)
+    for images, labels in test_ds.take(1):
+        print("test images.shape:", images.shape)
     
     history = model.fit(
         train_ds, 
         validation_data=val_ds,
         epochs=100,
-        class_weight=class_weights,
         verbose=True,
+        #class_weight=class_weights,
         callbacks=[
-            keras.callbacks.EarlyStopping(
+            tf.keras.callbacks.EarlyStopping(
                 monitor='val_loss',
                 patience=10,
                 verbose=1
             )
         ]
     )
+
+    from sklearn.metrics import classification_report
+
+    # 予測値と正解ラベルを集める
+    y_true, y_pred = [], []
+    for images, labels in test_ds:
+        preds = model.predict(images)
+        y_true.extend(labels.numpy())
+        y_pred.extend(tf.argmax(preds, axis=1).numpy())
+
+    print(classification_report(y_true, y_pred, digits=4))
 
     show_graph(history)
 

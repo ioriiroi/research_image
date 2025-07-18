@@ -127,3 +127,36 @@ predict actual
 二値分類的: 6/10
 
 正規化があると予想散らばらない
+
+
+モデルのラベルづけがずれていた
+修正版
+~10 or 50~
+deep_with_regular l2:0.005 Miku
+クラスバランス 1:1
+              precision    recall  f1-score   support
+
+           0     0.6481    0.8077    0.7192       130
+           1     0.7727    0.5986    0.6746       142
+
+    accuracy                         0.6985       272
+   macro avg     0.7104    0.7031    0.6969       272
+weighted avg     0.7132    0.6985    0.6959       272
+
+test accuracy: 0.6985294222831726
+test loss: 0.9580196142196655
+
+random
+クラス 0: 498 サンプル (61.94%)
+クラス 1: 306 サンプル (38.06%)
+              precision    recall  f1-score   support
+
+           0     0.7653    0.7812    0.7732        96
+           1     0.6613    0.6406    0.6508        64
+
+    accuracy                         0.7250       160
+   macro avg     0.7133    0.7109    0.7120       160
+weighted avg     0.7237    0.7250    0.7242       160
+
+test accuracy: 0.7250000238418579
+test loss: 0.7509865164756775

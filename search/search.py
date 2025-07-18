@@ -169,8 +169,8 @@ def main():
     data_json = openJson(mikuJsonDir)
     word = "初音ミク"
     sort = "date_asc"
-    start_date = "2023-7-13"
-    end_date = "2024-7-16"
+    start_date = "2023-7-17"
+    end_date = "2024-7-31"
     json_dir = mikuJsonDir
     download(api, start_date, end_date, word, sort, DLfile, data_json, json_dir, maxCount)
 

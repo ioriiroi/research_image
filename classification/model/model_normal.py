@@ -1,8 +1,7 @@
 import tensorflow as tf
-from tensorflow import keras
 from tensorflow.python.keras import layers
-from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
-from tensorflow.python.keras.models import Sequential
+from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
+from keras.models import Sequential
 from keras.optimizers import Adam
 
 def model_normal(IMAGE_SIZE):
@@ -120,7 +119,7 @@ def model_balanced(IMAGE_SIZE, num_classes):
 
 def model_deep_with_regularization(IMAGE_SIZE, num_classes):
     """正則化を強化した深いモデル"""
-    l2_num = 0.0005
+    l2_num = 0.005
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(IMAGE_SIZE, IMAGE_SIZE, 3)),
         
@@ -147,7 +146,7 @@ def model_deep_with_regularization(IMAGE_SIZE, num_classes):
         
         # 分類層
         tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(64, activation='relu',
+        tf.keras.layers.Dense(16, activation='relu',
                              kernel_regularizer=tf.keras.regularizers.l2(0.001)),
         tf.keras.layers.BatchNormalization(),
         tf.keras.layers.Dropout(0.5),

@@ -21,19 +21,25 @@ def set_label(data):
             all_image_labels.append(label)
     return all_image_labels, class_num
 
-def set_label_devide2(data):
-    all_image_labels = []
+def set_label_devide2(image_paths, bookmarks):
+    image_labels = []
+    paths = []
     class_num = 2
-    for num in data:
-        bookmark = data[num]['bookmark']
-        if bookmark <= 10:
+    tmp = [0] * class_num
+    label_limit = float("inf")
+    for image_paths, bookmark in zip(image_paths, bookmarks):
+        if bookmark <= 10 and tmp[0] < label_limit:
             label = 0
-        elif bookmark >= 1000:
+            tmp[0] += 1
+        elif bookmark >= 50  and tmp[1] < label_limit:
             label = 1
+            tmp[1] += 1
         else:
             continue
-        all_image_labels.append(label)
-    return all_image_labels, class_num
+        image_labels.append(label)
+        paths.append(image_paths)
+        # print(image_paths, bookmark)
+    return paths, image_labels, class_num
 
 def set_label_interval(data):
     all_image_labels = []
