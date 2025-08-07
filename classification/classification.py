@@ -16,7 +16,7 @@ from sklearn.model_selection import train_test_split
 # --- 自作のライブラリ ---
 from model.model_normal import model_normal, model_normal_deep, model_normal_deep2, model_simple, model_balanced, model_deep_with_regularization
 from model.model_mobilenet import model_mobilenet
-from model.model_VGG16 import model_VGG16
+from model.model_VGG16 import model_VGG16, model_VGG16_block5_conv3
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from setting import config
@@ -36,7 +36,7 @@ data_dir = config.DATA_DIR
 image_dir = config.ILLUST_DIR
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH_SIZE = 16
-IMAGE_SIZE = 224
+IMAGE_SIZE = 256
 
 
 def file_diff_check(image_path, data):
@@ -51,24 +51,6 @@ def road_image_path(image_dir):
     all_image_paths = list(glob.glob("{}/*.jpg".format(image_dir))) # 画像パスを全て取得
     all_image_paths = natsorted(all_image_paths) # パスをソート
     return all_image_paths
-
-def preprocess_image(path):
-    try:
-        image = tf.io.read_file(path)
-        image = tf.image.decode_image(image, channels=3, expand_animations=False)
-        
-        # データ拡張を追加
-        image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])  # 余裕を持ってリサイズ
-        image = tf.image.random_crop(image, [IMAGE_SIZE, IMAGE_SIZE, 3])  # ランダムクロップ
-        image = tf.image.random_flip_left_right(image)  # 左右反転
-        image = tf.image.random_brightness(image, 0.1)  # 明るさをランダムに変更
-        image = tf.image.random_contrast(image, 0.8, 1.2)  # コントラストをランダムに変更
-        
-        image = tf.cast(image, tf.float32) / 255.0
-        return image
-    except Exception as e:
-        tf.print("画像処理エラー:", e)
-        return tf.zeros([IMAGE_SIZE, IMAGE_SIZE, 3], dtype=tf.float32)
 
 
 def load_csv(csv_path):
@@ -121,94 +103,6 @@ def calculate_balanced_weights(labels):
     
     return class_weights
 
-def resize_with_aspect_ratio(image, target_size):
-    """アスペクト比を保持しながらリサイズし、パディングで正方形にする"""
-    # 現在の画像サイズを取得
-    original_height = tf.cast(tf.shape(image)[0], tf.float32)
-    original_width = tf.cast(tf.shape(image)[1], tf.float32)
-    
-    # アスペクト比を計算
-    aspect_ratio = original_width / original_height
-    target_size_float = tf.cast(target_size, tf.float32)
-    
-    # 新しいサイズを計算（アスペクト比を保持）
-    if aspect_ratio > 1.0:
-        # 横長の場合
-        new_width = target_size_float
-        new_height = target_size_float / aspect_ratio
-    else:
-        # 縦長または正方形の場合
-        new_height = target_size_float
-        new_width = target_size_float * aspect_ratio
-    
-    # 整数に変換
-    new_height = tf.cast(new_height, tf.int32)
-    new_width = tf.cast(new_width, tf.int32)
-    
-    # アスペクト比を保持してリサイズ
-    image = tf.image.resize(image, [new_height, new_width])
-    
-    # 正方形になるようにパディング
-    # パディング量を計算
-    pad_height = target_size - new_height
-    pad_width = target_size - new_width
-    
-    # 上下左右に均等にパディング
-    pad_top = pad_height // 2
-    pad_bottom = pad_height - pad_top
-    pad_left = pad_width // 2
-    pad_right = pad_width - pad_left
-    
-    # パディングを適用（黒で埋める）
-    image = tf.pad(image, [[pad_top, pad_bottom], [pad_left, pad_right], [0, 0]], 
-                   mode='CONSTANT', constant_values=0)
-    
-    return image
-
-def resize_with_aspect_ratio_white_padding(image, target_size):
-    """アスペクト比を保持しながらリサイズし、白いパディングで正方形にする"""
-    # 現在の画像サイズを取得
-    original_height = tf.cast(tf.shape(image)[0], tf.float32)
-    original_width = tf.cast(tf.shape(image)[1], tf.float32)
-    
-    # アスペクト比を計算
-    aspect_ratio = original_width / original_height
-    target_size_float = tf.cast(target_size, tf.float32)
-    
-    # 新しいサイズを計算（アスペクト比を保持）
-    if aspect_ratio > 1.0:
-        # 横長の場合
-        new_width = target_size_float
-        new_height = target_size_float / aspect_ratio
-    else:
-        # 縦長または正方形の場合
-        new_height = target_size_float
-        new_width = target_size_float * aspect_ratio
-    
-    # 整数に変換
-    new_height = tf.cast(new_height, tf.int32)
-    new_width = tf.cast(new_width, tf.int32)
-    
-    # アスペクト比を保持してリサイズ
-    image = tf.image.resize(image, [new_height, new_width])
-    
-    # 正方形になるようにパディング
-    # パディング量を計算
-    pad_height = target_size - new_height
-    pad_width = target_size - new_width
-    
-    # 上下左右に均等にパディング
-    pad_top = pad_height // 2
-    pad_bottom = pad_height - pad_top
-    pad_left = pad_width // 2
-    pad_right = pad_width - pad_left
-    
-    # パディングを適用（白で埋める）
-    image = tf.pad(image, [[pad_top, pad_bottom], [pad_left, pad_right], [0, 0]], 
-                   mode='CONSTANT', constant_values=255)  # 白で埋める
-    
-    return image
-
 def simple_rotation_augmentation(image, min_angle, max_angle):
     """
     シンプルな回転拡張（tf.py_functionを使用）
@@ -255,45 +149,6 @@ def simple_rotation_augmentation(image, min_angle, max_angle):
     
     return rotated_image
 
-def apply_augmentation(image, label, pattern):
-    """
-    複数の拡張パターンを適用する関数
-    pattern: 適用する拡張パターンの番号（0-4）
-    """
-    # 基本のリサイズ（すべてのパターンに適用）
-    image = resize_with_aspect_ratio(image, IMAGE_SIZE)
-    
-    # パターン別の拡張処理
-    if pattern == 0:
-        # パターン1: 基本的な拡張
-        image = tf.image.random_flip_left_right(image)
-        image = tf.image.random_brightness(image, 0.5)
-        image = tf.image.random_contrast(image, 0.8, 1.2)
-        
-    elif pattern == 1:
-        # パターン5: ぼかしと強い色調変更
-        image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
-        # ガウスぼかしの代わりにダウンサンプリングとアップサンプリング
-        image_small = tf.image.resize(image, [IMAGE_SIZE // 2, IMAGE_SIZE // 2])
-        image = tf.image.resize(image_small, [IMAGE_SIZE, IMAGE_SIZE])
-        # image = tf.image.random_hue(image, 0.5)
-        # image = tf.image.random_saturation(image, 0.8, 1.2)
-    elif pattern == 2:
-        # パターン7: ランダム回転拡張
-        image = simple_rotation_augmentation(image, min_angle=-45, max_angle=45)
-        # パディングとクロップでランダムシフト効果を出す
-        padded = tf.pad(image, [[10, 10], [10, 10], [0, 0]], mode='REFLECT')
-        offset_h = tf.random.uniform([], maxval=20, dtype=tf.int32)
-        offset_w = tf.random.uniform([], maxval=20, dtype=tf.int32)
-        image = tf.image.crop_to_bounding_box(
-            padded, offset_h, offset_w, IMAGE_SIZE, IMAGE_SIZE
-        )
-        image = tf.image.random_flip_left_right(image)
-        
-    # 正規化（すべてのパターンに適用）
-    image = tf.cast(image, tf.float32) / 255.0
-    
-    return image, label
     
 def safe_decode_image(image_bytes):
     """複数のデコード方法を試す堅牢な画像デコード関数"""
@@ -319,16 +174,23 @@ def robust_preprocess(path, label, augment):
     try:
         image = tf.io.read_file(path)
         image = tf.image.decode_image(image, channels=3, expand_animations=False)
-        image.set_shape([None, None, 3])
+        shape_tensor = tf.shape(image) # 画像サイズを取得
+        max_size = tf.reduce_max(shape_tensor) # 画像の長辺を取得
+        # アスペクト比を保ったままの切り取り
+        image = tf.image.resize_with_crop_or_pad(image, max_size, max_size)
         image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
-        if augment:
-            image = tf.image.random_flip_left_right(image)
+
         image = tf.cast(image, tf.float32) / 255.0
         image = tf.ensure_shape(image, [IMAGE_SIZE, IMAGE_SIZE, 3])
         return image, label
     except Exception as e:
         tf.print("処理エラー:", path)
         return tf.zeros([IMAGE_SIZE, IMAGE_SIZE, 3], dtype=tf.float32), label
+
+def robust_preprocess_flip(path, label, augment):
+    image, label = robust_preprocess(path, label, augment)
+    image = tf.image.flip_left_right(image)  # 必ず反転
+    return image, label
 """"""
 
 def show_graph(history):
@@ -444,10 +306,12 @@ def main():
     train_ds = remaining_ds.skip(val_size)
 
     # 6. 堅牢な前処理の適用
-    train_ds = train_ds.map(
-        lambda path, label: robust_preprocess(path, label, augment=True),
-        num_parallel_calls=AUTOTUNE
-    )
+    # 通常画像データセット
+    train_ds1 = train_ds.map(lambda path, label: robust_preprocess(path, label, augment=True), num_parallel_calls=AUTOTUNE)
+    # 左右反転画像データセット
+    train_ds2 = train_ds.map(lambda path, label: robust_preprocess_flip(path, label, augment=True), num_parallel_calls=AUTOTUNE)
+    # 連結して2倍に
+    train_ds = train_ds1.concatenate(train_ds2)
     
     val_ds = val_ds.map(
         lambda path, label: robust_preprocess(path, label, augment=False),
@@ -477,6 +341,13 @@ def main():
     for images, labels in train_ds.take(1):
         print("images.shape:", images.shape)  # (BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, 3)
         print("labels.shape:", labels.shape)  # (BATCH_SIZE,)
+
+    # for image, label in train_ds.unbatch().take(10):
+    #     plt.imshow(image.numpy())
+    #     plt.title(f"label: {label.numpy()}")
+    #     plt.axis('off')
+    #     plt.show()
+    # exit()
 
     model = model_deep_with_regularization(IMAGE_SIZE, CLASS_NUM)
     # model = model_mobilenet(IMAGE_SIZE)

@@ -125,21 +125,21 @@ def model_deep_with_regularization(IMAGE_SIZE, num_classes):
         
         # 1層目
         tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same',
-                              kernel_regularizer=tf.keras.regularizers.l2(l2_num)),
+                kernel_regularizer=tf.keras.regularizers.l2(l2_num)),
         tf.keras.layers.BatchNormalization(),
         tf.keras.layers.MaxPooling2D((2, 2)),
         tf.keras.layers.Dropout(0.3),
         
         # 2層目
         tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same',
-                              kernel_regularizer=tf.keras.regularizers.l2(l2_num)),
+                kernel_regularizer=tf.keras.regularizers.l2(l2_num)),
         tf.keras.layers.BatchNormalization(),
         tf.keras.layers.MaxPooling2D((2, 2)),
         tf.keras.layers.Dropout(0.3),
         
         # 3層目
         tf.keras.layers.Conv2D(128, (3, 3), activation='relu', padding='same',
-                              kernel_regularizer=tf.keras.regularizers.l2(l2_num)),
+                kernel_regularizer=tf.keras.regularizers.l2(l2_num)),
         tf.keras.layers.BatchNormalization(),
         tf.keras.layers.MaxPooling2D((2, 2)),
         tf.keras.layers.Dropout(0.3),
@@ -147,7 +147,7 @@ def model_deep_with_regularization(IMAGE_SIZE, num_classes):
         # 分類層
         tf.keras.layers.Flatten(),
         tf.keras.layers.Dense(16, activation='relu',
-                             kernel_regularizer=tf.keras.regularizers.l2(0.001)),
+                kernel_regularizer=tf.keras.regularizers.l2(0.001)),
         tf.keras.layers.BatchNormalization(),
         tf.keras.layers.Dropout(0.5),
         tf.keras.layers.Dense(num_classes, activation='softmax')

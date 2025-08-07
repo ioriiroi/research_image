@@ -1,5 +1,5 @@
 import tensorflow as tf
-from keras.layers import GlobalAveragePooling2D, Reshape, Dense, Multiply, Dropout, Flatten
+from keras.layers import GlobalAveragePooling2D, Reshape, Dense, Multiply, Dropout, Flatten, Conv2D, BatchNormalization
 from keras.models import Model
 
 from keras.applications.vgg16 import VGG16
@@ -22,6 +22,20 @@ def model_VGG16(IMAGE_SIZE, num_classes):
     x = Flatten()(x)
     x = Dense(64, activation='relu')(x)
     x = Dropout(0.2)(x)
+    output = Dense(num_classes, activation='softmax')(x)
+    model = Model(inputs=base_model.input, outputs=output)
+    return model
+
+def model_VGG16_block5_conv3(IMAGE_SIZE, num_classes):
+    base_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+    l2_num = 0.005
+
+    x = base_model.get_layer('block2_pool').output
+
+    x = Flatten()(x)
+    x = Dense(64, activation='relu')(x)
+    x = Dropout(0.5)(x)
+
     output = Dense(num_classes, activation='softmax')(x)
     model = Model(inputs=base_model.input, outputs=output)
     return model
