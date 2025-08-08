@@ -12,6 +12,9 @@ from natsort import natsorted
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from setting import config
 
+# 警告を非表示にする
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # 0=全て, 1=INFO以外, 2=WARNING以外, 3=ERROR以外
+
 image_dir = config.ILLUST_DIR
 lbp = "data/lbpcascade_animeface.xml"
 

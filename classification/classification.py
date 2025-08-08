@@ -20,7 +20,7 @@ from model.model_VGG16 import model_VGG16, model_VGG16_block5_conv3
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from setting import config
-from lib.SetLabel import set_label, set_label_devide2, set_label_interval
+from lib.set_label import SetLabel
 from src.JsonLoadAndWrite import openJson
 
 # 警告を非表示にする
@@ -46,7 +46,6 @@ def file_diff_check(image_path, data):
         if path not in data:
             print(path)
 
-
 def road_image_path(image_dir):
     all_image_paths = list(glob.glob("{}/*.jpg".format(image_dir))) # 画像パスを全て取得
     all_image_paths = natsorted(all_image_paths) # パスをソート
@@ -59,9 +58,6 @@ def load_csv(csv_path):
         csv_list = [row for row in reader]
 
     return csv_list
-
-def change_range(image,label):
-    return 2*image-1, label
 
 """ AIが作成 """
 def check_class_balance(labels):
@@ -267,16 +263,15 @@ def main():
     all_image_paths = road_image_path(image_dir)
     data_json = openJson(data_dir)
 
-    # 画像ファイル名（拡張子なし）のリストを作成
-    image_names = set(os.path.splitext(os.path.basename(p))[0] for p in all_image_paths)
-    image_paths = []
-    bookmarks = []
-    for id in data_json:
-        if id in image_names:
-            image_paths.append(f"{image_dir}/{id}.jpg")
-            bookmarks.append(data_json[id]["bookmark"])
+    # 画像ファイル名（拡張子なし）のリストを作成 例: 12345_a_b.jpg -> 12345
+    image_names = []
+    for p in all_image_paths:
+        filename = os.path.splitext(os.path.basename(p))[0]  # 拡張子を除去
+        image_names.append(filename)
 
-    image_paths, all_image_labels, CLASS_NUM = set_label_devide2(image_paths, bookmarks)
+    paths_bookmarks = SetLabel.get_bookmark(data_json, image_names)
+
+    image_paths, all_image_labels, CLASS_NUM = SetLabel.set_label_devide2(paths_bookmarks)
     # print(len(image_paths), len(all_image_labels))
     # for image, label in zip(image_paths, all_image_labels):
     #     print(image, label)
