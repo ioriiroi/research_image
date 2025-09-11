@@ -4,9 +4,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from setting import config
 
 class SetLabel:
-    def get_bookmark(data, image_names):
+    def get_bookmark(image_dir, data, image_names):
         paths_bookmarks = {}
-        image_dir = config.ILLUST_DIR
         for name in image_names:
             id = name.split("_")[0]
             if id in data:
@@ -44,17 +43,17 @@ class SetLabel:
         label_limit = float("inf")
         for id, item in paths_bookmarks.items():
             image_path, bookmark = item["path"], item["bookmark"]
-            if bookmark <= 10 and tmp[0] < label_limit:
+            if bookmark <= 1 and tmp[0] < label_limit:
                 label = 0
                 tmp[0] += 1
-            elif bookmark >= 50  and tmp[1] < label_limit:
+            elif bookmark >= 45  and tmp[1] < label_limit:
                 label = 1
                 tmp[1] += 1
             else:
                 continue
             image_labels.append(label)
             paths.append(image_path)
-            # print(image_paths, bookmark)
+            # print(image_path, bookmark)
         return paths, image_labels, class_num
 
     def set_label_interval(data):

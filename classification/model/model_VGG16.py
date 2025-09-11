@@ -3,6 +3,7 @@ from keras.layers import GlobalAveragePooling2D, Reshape, Dense, Multiply, Dropo
 from keras.models import Model
 
 from keras.applications.vgg16 import VGG16
+from tensorflow.keras.applications import EfficientNetB4
 
 def se_block(input_tensor, ratio=8):
     channel_axis = -1
@@ -16,26 +17,24 @@ def se_block(input_tensor, ratio=8):
     return x
 
 def model_VGG16(IMAGE_SIZE, num_classes):
-    base_model = VGG16(include_top=False, input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3))
+    base_model = VGG16(weights=None, include_top=False, input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3))
     x = base_model.output
     # x = se_block(x)  # Attentionブロックを追加
     x = Flatten()(x)
     x = Dense(64, activation='relu')(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.5)(x)
     output = Dense(num_classes, activation='softmax')(x)
     model = Model(inputs=base_model.input, outputs=output)
     return model
 
-def model_VGG16_block5_conv3(IMAGE_SIZE, num_classes):
-    base_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-    l2_num = 0.005
+def model_EfficientNet(IMAGE_SIZE, num_classes):
+    base_model = EfficientNetB4(weights="imagenet", include_top=False, input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3))
+    base_model.trainable = True
+    for layer in base_model.layers[:-50]:  # 下位の層は凍結
+        layer.trainable = False
 
-    x = base_model.get_layer('block2_pool').output
-
-    x = Flatten()(x)
-    x = Dense(64, activation='relu')(x)
-    x = Dropout(0.5)(x)
-
-    output = Dense(num_classes, activation='softmax')(x)
+    x = tf.keras.layers.GlobalAveragePooling2D()(base_model.output)
+    x = tf.keras.layers.Dense(128, activation='relu')(x)
+    output = tf.keras.layers.Dense(num_classes, activation='softmax')(x)
     model = Model(inputs=base_model.input, outputs=output)
     return model

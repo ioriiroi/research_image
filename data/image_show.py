@@ -15,8 +15,8 @@ def road_image_path(image_dir):
     all_image_paths = natsorted(all_image_paths) # パスをソート
     return all_image_paths
 
-data_dir = config.DATA_DIR
-image_dir = config.ILLUST_DIR
+data_dir = config.DATA_JSON_DIR
+image_dir = config.DOWNLOAD_DIR
 
 all_image_paths = road_image_path(image_dir)
 data_json = openJson(data_dir)

@@ -8,8 +8,8 @@ from PIL import Image
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from setting import config
 
-data_dir = config.ILLUST_MIKU_DIR
-destination_dir = config.ILLUST_MIKU_DIR
+data_dir = config.DOWNLOAD_DIR
+destination_dir = config.DOWNLOAD_DIR
 image_extensions = [".png", ".jpg"]  # add there all your images file extensions
 
 img_type_accepted_by_tf = ["jpeg", "png"]

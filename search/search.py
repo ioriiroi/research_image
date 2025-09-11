@@ -21,11 +21,10 @@ UTC = timezone("UTC")
 JST = timezone("Asia/Tokyo")
 timeFormat = "%Y-%m-%d %H:%M:%S"
 downloadDir = config.DOWNLOAD_DIR
-illustJsonDir = "data/illustData.json"
-searchedJsonDir = "data/searched.json"
+illustJsonDir = config.DATA_JSON_DIR
 illustMikuDir = config.ILLUST_MIKU_DIR
 mikuJsonDir = config.MIKU_DATA_DIR
-maxCount = 1000
+maxCount = 3000
 sleepTime = 3
 tagsNG = ["R-18", "R-18G", "漫画", "AI生成", "うごイラ"]
 
@@ -165,13 +164,13 @@ def download(api, start_date, end_date, word, sort, DLfile, data_json, json_dir,
 
 def main():
     api = apiLogin()
-    DLfile = illustMikuDir
-    data_json = openJson(mikuJsonDir)
-    word = "初音ミク"
+    DLfile = downloadDir
+    data_json = openJson(illustJsonDir)
+    word = "オリジナル"
     sort = "date_asc"
-    start_date = "2023-7-17"
-    end_date = "2024-7-31"
-    json_dir = mikuJsonDir
+    start_date = "2024-9-1"
+    end_date = "2025-8-26"
+    json_dir = illustJsonDir
     download(api, start_date, end_date, word, sort, DLfile, data_json, json_dir, maxCount)
 
     print("illusts: {} files".format(len(data_json)))

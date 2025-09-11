@@ -12,11 +12,12 @@ from natsort import natsorted
 from tensorflow import keras
 from keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
+from tensorflow.keras.applications.efficientnet import preprocess_input
 
 # --- 自作のライブラリ ---
 from model.model_normal import model_normal, model_normal_deep, model_normal_deep2, model_simple, model_balanced, model_deep_with_regularization
 from model.model_mobilenet import model_mobilenet
-from model.model_VGG16 import model_VGG16, model_VGG16_block5_conv3
+from model.model_VGG16 import model_VGG16, model_EfficientNet
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from setting import config
@@ -32,8 +33,8 @@ print(f"TensorFlow has access to the following devices:\n{tf.config.list_physica
 # See TensorFlow version
 print(f"TensorFlow version: {tf.__version__}")
 
-data_dir = config.DATA_DIR
-image_dir = config.ILLUST_DIR
+data_dir = config.DATA_JSON_DIR
+image_dir = config.DOWNLOAD_DIR
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH_SIZE = 16
 IMAGE_SIZE = 256
@@ -166,6 +167,42 @@ def safe_decode_image(image_bytes):
                 # すべて失敗した場合はエラーを発生
                 raise ValueError("画像のデコードに失敗しました")
 
+def resize_with_padding_tf(image, size):
+    """
+    アスペクト比を保持してリサイズし、パディングで正方形(size x size)にする（TensorFlow ops）
+    image: uint8 / float tensor with shape [H, W, 3]
+    size: int (出力の長さ)
+    """
+    image = tf.convert_to_tensor(image)
+    orig_shape = tf.shape(image)
+    h = tf.cast(orig_shape[0], tf.float32)
+    w = tf.cast(orig_shape[1], tf.float32)
+    size_f = tf.cast(size, tf.float32)
+
+    scale = size_f / tf.maximum(h, w)
+    new_h = tf.cast(tf.round(h * scale), tf.int32)
+    new_w = tf.cast(tf.round(w * scale), tf.int32)
+
+    # リサイズ（補間は縮小時はAREA、拡大時はBILINEARを自動選択）
+    resized = tf.image.resize(image, [new_h, new_w], method=tf.image.ResizeMethod.BILINEAR)
+
+    # パディング量を計算して中央寄せ
+    pad_h = size - new_h
+    pad_w = size - new_w
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    # padded は float または uint8 を受け取れる。ここでは中間値128（グレー）で埋める
+    padded = tf.pad(resized,
+                    [[pad_top, pad_bottom], [pad_left, pad_right], [0, 0]],
+                    constant_values=128)
+
+    # 念のため最終サイズを整える
+    padded = tf.image.resize_with_crop_or_pad(padded, size, size)
+    return padded
+
 def robust_preprocess(path, label, augment):
     try:
         image = tf.io.read_file(path)
@@ -173,11 +210,12 @@ def robust_preprocess(path, label, augment):
         shape_tensor = tf.shape(image) # 画像サイズを取得
         max_size = tf.reduce_max(shape_tensor) # 画像の長辺を取得
         # アスペクト比を保ったままの切り取り
-        image = tf.image.resize_with_crop_or_pad(image, max_size, max_size)
-        image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
+        # image = tf.image.resize_with_crop_or_pad(image, max_size, max_size)
+        # image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
+        image = resize_with_padding_tf(image, IMAGE_SIZE)
 
         image = tf.cast(image, tf.float32) / 255.0
-        image = tf.ensure_shape(image, [IMAGE_SIZE, IMAGE_SIZE, 3])
+        image = preprocess_input(image)
         return image, label
     except Exception as e:
         tf.print("処理エラー:", path)
@@ -269,7 +307,7 @@ def main():
         filename = os.path.splitext(os.path.basename(p))[0]  # 拡張子を除去
         image_names.append(filename)
 
-    paths_bookmarks = SetLabel.get_bookmark(data_json, image_names)
+    paths_bookmarks = SetLabel.get_bookmark(image_dir, data_json, image_names)
 
     image_paths, all_image_labels, CLASS_NUM = SetLabel.set_label_devide2(paths_bookmarks)
     # print(len(image_paths), len(all_image_labels))
@@ -282,7 +320,7 @@ def main():
     ds_path_label = tf.data.Dataset.zip((ds_path, ds_labels))
 
     # 3. データをシャッフル
-    ds_shuffled = ds_path_label.shuffle(buffer_size=1000, seed=42, reshuffle_each_iteration=False)
+    ds_shuffled = ds_path_label.shuffle(buffer_size=1000, reshuffle_each_iteration=False)
     
     # 4. データセットの総数を確認
     dataset_size = tf.data.experimental.cardinality(ds_shuffled).numpy()
@@ -337,14 +375,14 @@ def main():
         print("images.shape:", images.shape)  # (BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, 3)
         print("labels.shape:", labels.shape)  # (BATCH_SIZE,)
 
-    # for image, label in train_ds.unbatch().take(10):
+    # for image, label in train_ds.unbatch().take(20):
     #     plt.imshow(image.numpy())
     #     plt.title(f"label: {label.numpy()}")
     #     plt.axis('off')
     #     plt.show()
     # exit()
 
-    model = model_deep_with_regularization(IMAGE_SIZE, CLASS_NUM)
+    model = model_EfficientNet(IMAGE_SIZE, CLASS_NUM)
     # model = model_mobilenet(IMAGE_SIZE)
 
     # 学習率スケジューラーの追加
@@ -364,11 +402,11 @@ def main():
     )
 
     class_weights = calculate_balanced_weights(all_image_labels)
-    model.summary()
+    #model.summary()
 
     # モデルのコンパイル
     model.compile(
-        optimizer=Adam(learning_rate=lr_scheduler),
+        optimizer=Adam(learning_rate=1e-5),
         loss=tf.keras.losses.SparseCategoricalCrossentropy(),
         metrics=["accuracy"]
     )

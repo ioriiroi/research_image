@@ -149,7 +149,7 @@ def model_deep_with_regularization(IMAGE_SIZE, num_classes):
         tf.keras.layers.Dense(16, activation='relu',
                 kernel_regularizer=tf.keras.regularizers.l2(0.001)),
         tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.Dropout(0.5),
+        tf.keras.layers.Dropout(0.8),
         tf.keras.layers.Dense(num_classes, activation='softmax')
     ])
     
