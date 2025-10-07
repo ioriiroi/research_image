@@ -20,11 +20,11 @@ from src.JsonLoadAndWrite import openJson, saveJson
 UTC = timezone("UTC")
 JST = timezone("Asia/Tokyo")
 timeFormat = "%Y-%m-%d %H:%M:%S"
-downloadDir = config.DOWNLOAD_DIR
+downloadDir = config.ILLUST_GOOD_DIR
 illustJsonDir = config.DATA_JSON_DIR
 illustMikuDir = config.ILLUST_MIKU_DIR
 mikuJsonDir = config.MIKU_DATA_DIR
-maxCount = 3000
+maxCount = 100
 sleepTime = 3
 tagsNG = ["R-18", "R-18G", "漫画", "AI生成", "うごイラ"]
 
@@ -166,10 +166,10 @@ def main():
     api = apiLogin()
     DLfile = downloadDir
     data_json = openJson(illustJsonDir)
-    word = "オリジナル"
-    sort = "date_asc"
-    start_date = "2024-9-1"
-    end_date = "2025-8-26"
+    word = "NEEDYGIRLOVERDOSE10000users入り"
+    sort = "date_desc"
+    start_date = "2024-9-20"
+    end_date = "2025-9-20"
     json_dir = illustJsonDir
     download(api, start_date, end_date, word, sort, DLfile, data_json, json_dir, maxCount)
 

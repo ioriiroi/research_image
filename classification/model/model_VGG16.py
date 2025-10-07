@@ -29,12 +29,17 @@ def model_VGG16(IMAGE_SIZE, num_classes):
 
 def model_EfficientNet(IMAGE_SIZE, num_classes):
     base_model = EfficientNetB4(weights="imagenet", include_top=False, input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3))
+
+    layer_names = [l.name for l in base_model.layers]
+    idx = layer_names.index('block5a_expand_conv')
+
     base_model.trainable = True
-    for layer in base_model.layers[:-50]:  # 下位の層は凍結
+    for layer in base_model.layers[:idx]:  # 下位の層は凍結
         layer.trainable = False
 
     x = tf.keras.layers.GlobalAveragePooling2D()(base_model.output)
     x = tf.keras.layers.Dense(128, activation='relu')(x)
+    x = tf.keras.layers.Dropout(0.2)(x)
     output = tf.keras.layers.Dense(num_classes, activation='softmax')(x)
     model = Model(inputs=base_model.input, outputs=output)
     return model

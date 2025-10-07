@@ -13,6 +13,10 @@ from tensorflow import keras
 from keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.applications.efficientnet import preprocess_input
+from tensorflow.keras import layers, Sequential
+from keras.preprocessing import image
+from keras import models
+from keras.layers import MaxPooling2D, GlobalAveragePooling2D, Conv2D
 
 # --- 自作のライブラリ ---
 from model.model_normal import model_normal, model_normal_deep, model_normal_deep2, model_simple, model_balanced, model_deep_with_regularization
@@ -35,6 +39,7 @@ print(f"TensorFlow version: {tf.__version__}")
 
 data_dir = config.DATA_JSON_DIR
 image_dir = config.DOWNLOAD_DIR
+image_good_dir = config.ILLUST_GOOD_DIR
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH_SIZE = 16
 IMAGE_SIZE = 256
@@ -146,27 +151,6 @@ def simple_rotation_augmentation(image, min_angle, max_angle):
     
     return rotated_image
 
-    
-def safe_decode_image(image_bytes):
-    """複数のデコード方法を試す堅牢な画像デコード関数"""
-    try:
-        # JPEG形式として試す
-        image = tf.image.decode_jpeg(image_bytes, channels=3)
-        return image
-    except tf.errors.InvalidArgumentError:
-        try:
-            # PNG形式として試す
-            image = tf.image.decode_png(image_bytes, channels=3)
-            return image
-        except tf.errors.InvalidArgumentError:
-            try:
-                # 汎用デコーダーとして試す
-                image = tf.image.decode_image(image_bytes, channels=3, expand_animations=False)
-                return image
-            except:
-                # すべて失敗した場合はエラーを発生
-                raise ValueError("画像のデコードに失敗しました")
-
 def resize_with_padding_tf(image, size):
     """
     アスペクト比を保持してリサイズし、パディングで正方形(size x size)にする（TensorFlow ops）
@@ -203,19 +187,40 @@ def resize_with_padding_tf(image, size):
     padded = tf.image.resize_with_crop_or_pad(padded, size, size)
     return padded
 
+augment_layer = Sequential([
+    layers.RandomRotation(0.4),
+    layers.RandomTranslation(0, 0.2),
+    layers.RandomTranslation(0.2, 0),
+    layers.RandomZoom(0.2, 0.2),
+    layers.RandomFlip("horizontal_and_vertical"),
+    layers.RandomContrast(0.2),
+], name="augmentation_layer")
+
 def robust_preprocess(path, label, augment):
     try:
         image = tf.io.read_file(path)
         image = tf.image.decode_image(image, channels=3, expand_animations=False)
+
+        # rgb -> hsv
+        # image = tf.image.convert_image_dtype(image, tf.float32)  # 0-1 に正規化
+        # image = tf.image.rgb_to_hsv(image)
+
         shape_tensor = tf.shape(image) # 画像サイズを取得
         max_size = tf.reduce_max(shape_tensor) # 画像の長辺を取得
         # アスペクト比を保ったままの切り取り
-        # image = tf.image.resize_with_crop_or_pad(image, max_size, max_size)
-        # image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
-        image = resize_with_padding_tf(image, IMAGE_SIZE)
+        image = tf.image.resize_with_crop_or_pad(image, max_size, max_size)
+        image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
+        # image = resize_with_padding_tf(image, IMAGE_SIZE)
 
+        # augment フラグが True の場合、Keras の前処理レイヤーを適用
+        if augment:
+            # レイヤーはバッチ単位（[H,W,3] でも動作する）だが、tf.data.map内で確実に動かすため training=True を指定
+            image = augment_layer(image, training=True)
+        
         image = tf.cast(image, tf.float32) / 255.0
         image = preprocess_input(image)
+        image = tf.ensure_shape(image, [IMAGE_SIZE, IMAGE_SIZE, 3])
+
         return image, label
     except Exception as e:
         tf.print("処理エラー:", path)
@@ -295,19 +300,97 @@ def visualize_confusion_matrix(model, test_ds, class_names=None):
     plt.tight_layout()
     plt.show()
 
+def visualize_probability_scores(model, images, labels=None, class_names=None, max_plots=5, figsize=(12, 3)):
+    """
+    画像ごとの確率スコアを棒グラフで表示する。
+    - images: バッチ画像（Tensor or numpy array）, shape=(N, H, W, C) または単一画像 (H,W,C)
+    - labels: 真のラベル（オプション）
+    - class_names: クラス名リスト（省略時はクラスインデックスを使用）
+    - max_plots: 表示するサンプル数（バッチ内で先頭から）
+    """
+    import math
+
+    # バッチ化されていない単一画像を対応
+    imgs = images.numpy() if isinstance(images, tf.Tensor) else images
+    is_single = imgs.ndim == 3
+    if is_single:
+        imgs = imgs[np.newaxis, ...]
+        if labels is not None:
+            labels = np.array([labels.numpy()]) if isinstance(labels, tf.Tensor) else np.array([labels])
+
+    # 予測確率
+    preds = model.predict(imgs)
+    probs = tf.nn.softmax(preds, axis=1).numpy()
+
+    num_plots = min(max_plots, imgs.shape[0])
+    # 2行 (画像, 棒グラフ) x num_plots 列
+    fig_width = figsize[0] * num_plots
+    fig_height = figsize[1] * 2
+    fig, axes = plt.subplots(2, num_plots, figsize=(fig_width, fig_height))
+    # axes の形を統一
+    if num_plots == 1:
+        axes = np.expand_dims(axes, axis=1)  # (2,1)
+
+    for i in range(num_plots):
+        ax_img = axes[0, i]
+        ax_bar = axes[1, i]
+
+        img = imgs[i]
+        # uint8 (0-255) の場合はそのまま、float の場合は 0-1 を想定して表示
+        if img.dtype == np.float32 or img.dtype == np.float64:
+            disp_img = np.clip(img, 0.0, 1.0)
+        else:
+            disp_img = img.astype(np.uint8)
+            # 正規化されていない(0-255)を0-1にすることで matplotlib の挙動を安定させる
+            if disp_img.max() > 1:
+                disp_img = (disp_img / 255.0).astype(np.float32)
+
+        ax_img.imshow(disp_img)
+        ax_img.axis('off')
+
+        pred_cls = int(np.argmax(probs[i]))
+        pred_prob = float(np.max(probs[i]))
+        title = f"pred:{pred_cls} ({pred_prob:.2f})"
+        if labels is not None:
+            true_cls = int(labels[i].numpy()) if isinstance(labels[i], tf.Tensor) else int(labels[i])
+            title = f"true:{true_cls}\n" + title
+        ax_img.set_title(title)
+
+        xs = np.arange(probs.shape[1])
+        ax_bar.bar(xs, probs[i], color='tab:blue')
+        ax_bar.set_ylim(0, 1)
+        ax_bar.set_xticks(xs)
+        if class_names is not None:
+            ax_bar.set_xticklabels(class_names, rotation=45, ha='right')
+        else:
+            ax_bar.set_xticklabels([str(x) for x in xs], rotation=45, ha='right')
+        ax_bar.set_ylabel("probability")
+
+    plt.tight_layout()
+    plt.show()
+
 def main():
     print(BATCH_SIZE)
+    print(image_dir)
+    print(data_dir)
     # 1. 画像パスとラベルを取得
     all_image_paths = road_image_path(image_dir)
+    good_image_paths = road_image_path(image_good_dir)
     data_json = openJson(data_dir)
+    print(len(data_json))
 
     # 画像ファイル名（拡張子なし）のリストを作成 例: 12345_a_b.jpg -> 12345
     image_names = []
+    image_good_names = []
     for p in all_image_paths:
         filename = os.path.splitext(os.path.basename(p))[0]  # 拡張子を除去
         image_names.append(filename)
+    for p in good_image_paths:
+        filename = os.path.splitext(os.path.basename(p))[0]  # 拡張子を除去
+        image_good_names.append(filename)
+    
 
-    paths_bookmarks = SetLabel.get_bookmark(image_dir, data_json, image_names)
+    paths_bookmarks = SetLabel.get_bookmark(image_dir, data_json, image_names) | SetLabel.get_bookmark(image_good_dir, data_json, image_good_names)
 
     image_paths, all_image_labels, CLASS_NUM = SetLabel.set_label_devide2(paths_bookmarks)
     # print(len(image_paths), len(all_image_labels))
@@ -320,7 +403,7 @@ def main():
     ds_path_label = tf.data.Dataset.zip((ds_path, ds_labels))
 
     # 3. データをシャッフル
-    ds_shuffled = ds_path_label.shuffle(buffer_size=1000, reshuffle_each_iteration=False)
+    ds_shuffled = ds_path_label.shuffle(buffer_size=1000, seed=42, reshuffle_each_iteration=False)
     
     # 4. データセットの総数を確認
     dataset_size = tf.data.experimental.cardinality(ds_shuffled).numpy()
@@ -367,9 +450,9 @@ def main():
     print(f"合計: {train_ds_size + val_ds_size + test_ds_size}")
     
     # 8. バッチ処理とプリフェッチの設定
-    train_ds = train_ds.batch(BATCH_SIZE, drop_remainder=True).prefetch(buffer_size=AUTOTUNE)
-    val_ds = val_ds.batch(BATCH_SIZE, drop_remainder=True).prefetch(buffer_size=AUTOTUNE)
-    test_ds = test_ds.batch(BATCH_SIZE, drop_remainder=True).prefetch(buffer_size=AUTOTUNE)
+    train_ds = train_ds.batch(BATCH_SIZE, drop_remainder=False).prefetch(buffer_size=AUTOTUNE)
+    val_ds = val_ds.batch(BATCH_SIZE, drop_remainder=False).prefetch(buffer_size=AUTOTUNE)
+    test_ds = test_ds.batch(BATCH_SIZE, drop_remainder=False).prefetch(buffer_size=AUTOTUNE)
 
     for images, labels in train_ds.take(1):
         print("images.shape:", images.shape)  # (BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, 3)
@@ -386,28 +469,21 @@ def main():
     # model = model_mobilenet(IMAGE_SIZE)
 
     # 学習率スケジューラーの追加
-    # lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(
-    #     monitor='val_loss',
-    #     factor=0.1,
-    #     patience=5,
-    #     min_lr=1e-8,
-    #     verbose=1
-    # )
-
     lr_scheduler = tf.keras.optimizers.schedules.ExponentialDecay(
-        initial_learning_rate=0.001,
+        initial_learning_rate=0.0005,
         decay_steps=100,
         decay_rate=0.96,
         staircase=False
     )
 
     class_weights = calculate_balanced_weights(all_image_labels)
-    #model.summary()
+    # モデルの構造確認
+    # model.summary()
 
     # モデルのコンパイル
     model.compile(
         optimizer=Adam(learning_rate=1e-5),
-        loss=tf.keras.losses.SparseCategoricalCrossentropy(),
+        loss='sparse_categorical_crossentropy',
         metrics=["accuracy"]
     )
 
@@ -417,6 +493,20 @@ def main():
         print("val images.shape:", images.shape)
     for images, labels in test_ds.take(1):
         print("test images.shape:", images.shape)
+
+    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=3,
+        min_lr=0.001,
+        verbose=1
+    )
+    earlystop = tf.keras.callbacks.EarlyStopping(
+        monitor='val_loss',
+        patience=10,
+        verbose=1,
+        restore_best_weights=True
+    )
     
     history = model.fit(
         train_ds, 
@@ -424,14 +514,63 @@ def main():
         epochs=100,
         verbose=True,
         #class_weight=class_weights,
-        callbacks=[
-            tf.keras.callbacks.EarlyStopping(
-                monitor='val_loss',
-                patience=10,
-                verbose=1
-            )
-        ]
+        callbacks=[reduce_lr, earlystop]
     )
+
+    #---------- 関数に -----------
+    # img = image.load_img("/Users/haru0126/pixiv-image-data/data/image_new_only_face/121865201.jpg", target_size=(IMAGE_SIZE, IMAGE_SIZE))
+    # img = image.img_to_array(img)
+    # img = np.expand_dims(img, axis=0)
+    # img = preprocess_input(img)
+    # print("IMAGE: %s" % str(img.shape))
+
+    # layers = model.layers[-10:-5]
+    # layer_outputs = [layer.output for layer in layers]
+    # activation_model = models.Model(inputs=model.inputs, outputs=layer_outputs)
+    # # activation_model.summary()
+
+    # activations = activation_model.predict(img)
+    # # for i, activation in enumerate(activations):
+    # #     print("%2d: %s" % (i, str(activation.shape)))
+    
+    # import math
+    # import seaborn as sns
+
+    # # プーリング層の出力のみに絞る (畳み込み層の出力も可視化できるが量が多くなるため)
+    # activations = [(layer.name, activation) for layer, activation in zip(layers, activations) if isinstance(layer, Conv2D)]
+
+    # for i, (name, activation) in enumerate(activations):
+    #     num_of_image = activation.shape[3]
+    #     max = np.max(activation[0])
+    #     for j in range(0, num_of_image):
+    #         plt.figure()
+    #         sns.heatmap(activation[0, :, :, j], vmin=0, vmax=max, xticklabels=False, yticklabels=False, square=False)
+    #         plt.savefig("%d_%d.png" % (i+1, j+1))
+    #         plt.close()
+    # exit()
+
+    # # 出力層ごとに特徴画像を並べてヒートマップ画像として出力
+    # for i, (name, activation) in enumerate(activations):
+    #     num_of_image = activation.shape[3]
+    #     cols = math.ceil(math.sqrt(num_of_image))
+    #     rows = math.floor(num_of_image / cols)
+    #     screen = []
+    #     for y in range(0, rows):
+    #         row = []
+    #         for x in range(0, cols):
+    #             j = y * cols + x
+    #             if j < num_of_image:
+    #                 row.append(activation[0, :, :, j])
+    #             else:
+    #                 row.append(np.zeros())
+    #         screen.append(np.concatenate(row, axis=1))
+    #     screen = np.concatenate(screen, axis=0)
+    #     plt.figure()
+    #     sns.heatmap(screen, xticklabels=False, yticklabels=False)
+    #     plt.savefig("%s.png" % name)
+    #     plt.close()
+    # exit()
+    #---------- 関数に -----------
 
     from sklearn.metrics import classification_report
 
@@ -441,6 +580,11 @@ def main():
         preds = model.predict(images)
         y_true.extend(labels.numpy())
         y_pred.extend(tf.argmax(preds, axis=1).numpy())
+
+    # --- 確率スコアの棒グラフを表示（テストデータの先頭バッチから最大5枚） ---
+    for images, labels in test_ds.take(10):
+        visualize_probability_scores(model, images[:5], labels[:5], class_names=[str(i) for i in range(CLASS_NUM)], max_plots=5)
+
 
     print(classification_report(y_true, y_pred, digits=4))
 

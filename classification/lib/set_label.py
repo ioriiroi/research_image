@@ -40,20 +40,20 @@ class SetLabel:
         paths = []
         class_num = 2
         tmp = [0] * class_num
-        label_limit = float("inf")
+        label_limit = 400
         for id, item in paths_bookmarks.items():
             image_path, bookmark = item["path"], item["bookmark"]
-            if bookmark <= 1 and tmp[0] < label_limit:
+            if bookmark <= 0 and tmp[0] < label_limit:
                 label = 0
                 tmp[0] += 1
-            elif bookmark >= 45  and tmp[1] < label_limit:
+            elif bookmark >= 5000  and tmp[1] < label_limit:
                 label = 1
                 tmp[1] += 1
             else:
                 continue
             image_labels.append(label)
             paths.append(image_path)
-            # print(image_path, bookmark)
+            # print(image_path, bookmark, label)
         return paths, image_labels, class_num
 
     def set_label_interval(data):
