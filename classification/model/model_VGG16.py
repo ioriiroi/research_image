@@ -39,7 +39,7 @@ def model_EfficientNet(IMAGE_SIZE, num_classes):
 
     x = tf.keras.layers.GlobalAveragePooling2D()(base_model.output)
     x = tf.keras.layers.Dense(128, activation='relu')(x)
-    x = tf.keras.layers.Dropout(0.2)(x)
+    # x = tf.keras.layers.Dropout(0.2)(x)
     output = tf.keras.layers.Dense(num_classes, activation='softmax')(x)
     model = Model(inputs=base_model.input, outputs=output)
     return model

@@ -392,7 +392,7 @@ def main():
 
     paths_bookmarks = SetLabel.get_bookmark(image_dir, data_json, image_names) | SetLabel.get_bookmark(image_good_dir, data_json, image_good_names)
 
-    image_paths, all_image_labels, CLASS_NUM = SetLabel.set_label_devide2(paths_bookmarks)
+    image_paths, all_image_labels, CLASS_NUM = SetLabel.set_label_front_and_back(paths_bookmarks)
     # print(len(image_paths), len(all_image_labels))
     # for image, label in zip(image_paths, all_image_labels):
     #     print(image, label)
@@ -516,61 +516,6 @@ def main():
         #class_weight=class_weights,
         callbacks=[reduce_lr, earlystop]
     )
-
-    #---------- 関数に -----------
-    # img = image.load_img("/Users/haru0126/pixiv-image-data/data/image_new_only_face/121865201.jpg", target_size=(IMAGE_SIZE, IMAGE_SIZE))
-    # img = image.img_to_array(img)
-    # img = np.expand_dims(img, axis=0)
-    # img = preprocess_input(img)
-    # print("IMAGE: %s" % str(img.shape))
-
-    # layers = model.layers[-10:-5]
-    # layer_outputs = [layer.output for layer in layers]
-    # activation_model = models.Model(inputs=model.inputs, outputs=layer_outputs)
-    # # activation_model.summary()
-
-    # activations = activation_model.predict(img)
-    # # for i, activation in enumerate(activations):
-    # #     print("%2d: %s" % (i, str(activation.shape)))
-    
-    # import math
-    # import seaborn as sns
-
-    # # プーリング層の出力のみに絞る (畳み込み層の出力も可視化できるが量が多くなるため)
-    # activations = [(layer.name, activation) for layer, activation in zip(layers, activations) if isinstance(layer, Conv2D)]
-
-    # for i, (name, activation) in enumerate(activations):
-    #     num_of_image = activation.shape[3]
-    #     max = np.max(activation[0])
-    #     for j in range(0, num_of_image):
-    #         plt.figure()
-    #         sns.heatmap(activation[0, :, :, j], vmin=0, vmax=max, xticklabels=False, yticklabels=False, square=False)
-    #         plt.savefig("%d_%d.png" % (i+1, j+1))
-    #         plt.close()
-    # exit()
-
-    # # 出力層ごとに特徴画像を並べてヒートマップ画像として出力
-    # for i, (name, activation) in enumerate(activations):
-    #     num_of_image = activation.shape[3]
-    #     cols = math.ceil(math.sqrt(num_of_image))
-    #     rows = math.floor(num_of_image / cols)
-    #     screen = []
-    #     for y in range(0, rows):
-    #         row = []
-    #         for x in range(0, cols):
-    #             j = y * cols + x
-    #             if j < num_of_image:
-    #                 row.append(activation[0, :, :, j])
-    #             else:
-    #                 row.append(np.zeros())
-    #         screen.append(np.concatenate(row, axis=1))
-    #     screen = np.concatenate(screen, axis=0)
-    #     plt.figure()
-    #     sns.heatmap(screen, xticklabels=False, yticklabels=False)
-    #     plt.savefig("%s.png" % name)
-    #     plt.close()
-    # exit()
-    #---------- 関数に -----------
 
     from sklearn.metrics import classification_report
 

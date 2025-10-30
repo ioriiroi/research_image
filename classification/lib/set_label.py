@@ -75,3 +75,23 @@ class SetLabel:
                 tmp[label] += 1
                 all_image_labels.append(label)
         return all_image_labels, class_num
+    
+    def set_label_front_and_back(bookmarks):
+        t = []
+        for id, item in bookmarks.items():
+            image_path, bookmark = item["path"], item["bookmark"]
+            t.append((bookmark, image_path))
+        t.sort()
+
+        image_labels = []
+        paths = []
+        num = 400
+
+        for i in range(num):
+            bookmark, path = t[i]
+            rev_bookmark, rev_path = t[len(t)-i-1]
+            image_labels.append(0)
+            paths.append(path)
+            image_labels.append(1)
+            paths.append(rev_path)
+        return paths, image_labels, 2
