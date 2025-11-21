@@ -17,6 +17,8 @@ from tensorflow.keras import layers, Sequential
 from keras.preprocessing import image
 from keras import models
 from keras.layers import MaxPooling2D, GlobalAveragePooling2D, Conv2D
+from sklearn.model_selection import StratifiedKFold, KFold
+from sklearn.metrics import classification_report
 
 # --- 自作のライブラリ ---
 from model.model_normal import model_normal, model_normal_deep, model_normal_deep2, model_simple, model_balanced, model_deep_with_regularization
@@ -201,24 +203,20 @@ def robust_preprocess(path, label, augment):
         image = tf.io.read_file(path)
         image = tf.image.decode_image(image, channels=3, expand_animations=False)
 
-        # rgb -> hsv
-        # image = tf.image.convert_image_dtype(image, tf.float32)  # 0-1 に正規化
-        # image = tf.image.rgb_to_hsv(image)
-
         shape_tensor = tf.shape(image) # 画像サイズを取得
         max_size = tf.reduce_max(shape_tensor) # 画像の長辺を取得
         # アスペクト比を保ったままの切り取り
         image = tf.image.resize_with_crop_or_pad(image, max_size, max_size)
         image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
-        # image = resize_with_padding_tf(image, IMAGE_SIZE)
 
         # augment フラグが True の場合、Keras の前処理レイヤーを適用
         if augment:
             # レイヤーはバッチ単位（[H,W,3] でも動作する）だが、tf.data.map内で確実に動かすため training=True を指定
             image = augment_layer(image, training=True)
         
+        
         image = tf.cast(image, tf.float32) / 255.0
-        image = preprocess_input(image)
+        #image = preprocess_input(image)
         image = tf.ensure_shape(image, [IMAGE_SIZE, IMAGE_SIZE, 3])
 
         return image, label
@@ -369,37 +367,10 @@ def visualize_probability_scores(model, images, labels=None, class_names=None, m
     plt.tight_layout()
     plt.show()
 
-def main():
-    print(BATCH_SIZE)
-    print(image_dir)
-    print(data_dir)
-    # 1. 画像パスとラベルを取得
-    all_image_paths = road_image_path(image_dir)
-    good_image_paths = road_image_path(image_good_dir)
-    data_json = openJson(data_dir)
-    print(len(data_json))
-
-    # 画像ファイル名（拡張子なし）のリストを作成 例: 12345_a_b.jpg -> 12345
-    image_names = []
-    image_good_names = []
-    for p in all_image_paths:
-        filename = os.path.splitext(os.path.basename(p))[0]  # 拡張子を除去
-        image_names.append(filename)
-    for p in good_image_paths:
-        filename = os.path.splitext(os.path.basename(p))[0]  # 拡張子を除去
-        image_good_names.append(filename)
-    
-
-    paths_bookmarks = SetLabel.get_bookmark(image_dir, data_json, image_names) | SetLabel.get_bookmark(image_good_dir, data_json, image_good_names)
-
-    image_paths, all_image_labels, CLASS_NUM = SetLabel.set_label_front_and_back(paths_bookmarks)
-    # print(len(image_paths), len(all_image_labels))
-    # for image, label in zip(image_paths, all_image_labels):
-    #     print(image, label)
-    
+def data_split(path, label):
     # 2. パスとラベルのデータセットを作成（まだ画像は読み込まない）
-    ds_path = tf.data.Dataset.from_tensor_slices(image_paths)
-    ds_labels = tf.data.Dataset.from_tensor_slices(tf.cast(all_image_labels, tf.int64))
+    ds_path = tf.data.Dataset.from_tensor_slices(path)
+    ds_labels = tf.data.Dataset.from_tensor_slices(tf.cast(label, tf.int64))
     ds_path_label = tf.data.Dataset.zip((ds_path, ds_labels))
 
     # 3. データをシャッフル
@@ -420,8 +391,6 @@ def main():
     remaining_ds = ds_shuffled.skip(test_size)
     val_ds = remaining_ds.take(val_size)
     train_ds = remaining_ds.skip(val_size)
-
-    # 6. 堅牢な前処理の適用
     # 通常画像データセット
     train_ds1 = train_ds.map(lambda path, label: robust_preprocess(path, label, augment=True), num_parallel_calls=AUTOTUNE)
     # 左右反転画像データセット
@@ -454,10 +423,145 @@ def main():
     val_ds = val_ds.batch(BATCH_SIZE, drop_remainder=False).prefetch(buffer_size=AUTOTUNE)
     test_ds = test_ds.batch(BATCH_SIZE, drop_remainder=False).prefetch(buffer_size=AUTOTUNE)
 
-    for images, labels in train_ds.take(1):
-        print("images.shape:", images.shape)  # (BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, 3)
-        print("labels.shape:", labels.shape)  # (BATCH_SIZE,)
+    return train_ds, val_ds, test_ds
 
+def k_fold(image_paths, all_image_labels):
+    K = 5
+    paths = np.array(image_paths)
+    labels = np.array(all_image_labels)
+    skf = StratifiedKFold(n_splits=K, shuffle=True, random_state=42)
+
+    tmp_path, test_path, tmp_label, test_label = train_test_split(paths, labels, test_size=0.2, random_state=42, stratify=labels)
+
+    test_path = test_path.tolist()
+    test_label = test_label.tolist()
+
+    fold_results = []
+    models = []
+    for fold, (train_idx, val_idx) in enumerate(skf.split(tmp_path, tmp_label), 1):
+        print(f"\n=== Fold {fold}/{K} ===")
+        tf.keras.backend.clear_session()
+
+        paths_train = paths[train_idx].tolist()
+        labels_train = labels[train_idx].tolist()
+        paths_val = paths[val_idx].tolist()
+        labels_val = labels[val_idx].tolist()
+
+        # Dataset を作る（path, label のまま）
+        train_base = tf.data.Dataset.from_tensor_slices((paths_train, tf.cast(labels_train, tf.int64)))
+        val_ds = tf.data.Dataset.from_tensor_slices((paths_val, tf.cast(labels_val, tf.int64)))
+
+        # augment ブランチを作り連結（I/O を減らしたいなら cache を検討）
+        train_ds1 = train_base.map(lambda p, l: robust_preprocess(p, l, augment=True), num_parallel_calls=AUTOTUNE)
+        train_ds2 = train_base.map(lambda p, l: robust_preprocess_flip(p, l, augment=True), num_parallel_calls=AUTOTUNE)
+        train_ds = train_ds1.concatenate(train_ds2)#.shuffle(buffer_size=max(1024, len(paths_train)*2), reshuffle_each_iteration=True)
+
+        val_ds = val_ds.map(lambda p, l: robust_preprocess(p, l, augment=False), num_parallel_calls=AUTOTUNE)
+
+        # batch / prefetch
+        train_ds = train_ds.batch(BATCH_SIZE, drop_remainder=True).prefetch(AUTOTUNE)
+        val_ds = val_ds.batch(BATCH_SIZE, drop_remainder=False).prefetch(AUTOTUNE)
+
+        print(f"train size: {len(paths_train)}, val size: {len(paths_val)}")
+
+        # モデルを新規作成してコンパイル
+        model = model_deep_with_regularization(IMAGE_SIZE, 2)
+        model.compile(optimizer=Adam(learning_rate=1e-5),
+                      loss='sparse_categorical_crossentropy',
+                      metrics=['accuracy'])
+
+        # class weights（必要なら）
+        class_weights = calculate_balanced_weights(labels_train)
+
+        callbacks = [
+            tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=1e-7, verbose=1),
+            tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=8, restore_best_weights=True, verbose=1),
+        ]
+
+        history = model.fit(train_ds,
+                            validation_data=val_ds,
+                            epochs=50,
+                            verbose=1,
+                            callbacks=callbacks)
+        val_metrics = model.evaluate(val_ds, verbose=0)
+        fold_results.append({'fold': fold, 'val_loss': float(val_metrics[0]), 'val_acc': float(val_metrics[1])})
+        print(f"Fold {fold} result: val_loss={val_metrics[0]:.4f}, val_acc={val_metrics[1]:.4f}")
+
+        models.append(model)
+        #show_graph(history)
+    
+    losses = [r['val_loss'] for r in fold_results]
+    accs = [r['val_acc'] for r in fold_results]
+    print("\n=== Cross-validation summary ===")
+    print(f"val_loss mean:{np.mean(losses):.4f}, std:{np.std(losses):.4f}")
+    print(f"val_acc  mean:{np.mean(accs):.4f}, std:{np.std(accs):.4f}")
+    # 結果の表示
+    for r in fold_results:
+        print(r)
+
+    test_ds = tf.data.Dataset.from_tensor_slices((test_path, tf.cast(test_label, tf.int64)))
+    test_ds = test_ds.map(lambda p, l: robust_preprocess(p, l, augment=False), num_parallel_calls=AUTOTUNE)
+    test_ds = test_ds.batch(BATCH_SIZE).prefetch(AUTOTUNE)
+
+    fold = 1
+    fold_results = []
+
+    for model in models:
+        # 予測値と正解ラベルを集める
+        y_true, y_pred = [], []
+        for images, labels in test_ds:
+            preds = model.predict(images)
+            y_true.extend(labels.numpy())
+            y_pred.extend(tf.argmax(preds, axis=1).numpy())
+
+        print(classification_report(y_true, y_pred, digits=4))
+
+        test_metrics = model.evaluate(test_ds, verbose=0)
+        fold_results.append({'fold': fold, 'test_loss': float(test_metrics[0]), 'test_acc': float(test_metrics[1])})
+        print(f"Fold {fold} result: test_loss={test_metrics[0]:.4f}, test_acc={test_metrics[1]:.4f}")
+
+        class_names = [0,1,2,3]
+        visualize_confusion_matrix(model, test_ds, class_names)
+        fold += 1
+    
+    losses = [r['test_loss'] for r in fold_results]
+    accs = [r['test_acc'] for r in fold_results]
+    print("\n=== Test summary ===")
+    print(f"test_loss mean:{np.mean(losses):.4f}, std:{np.std(losses):.4f}")
+    print(f"test_acc  mean:{np.mean(accs):.4f}, std:{np.std(accs):.4f}")
+    # 結果の表示
+    for r in fold_results:
+        print(r)
+
+def main():
+    print(BATCH_SIZE)
+    print(image_dir)
+    print(data_dir)
+    # 1. 画像パスとラベルを取得
+    all_image_paths = road_image_path(image_dir)
+    good_image_paths = road_image_path(image_good_dir)
+    data_json = openJson(data_dir)
+    print(len(data_json))
+
+    # 画像ファイル名（拡張子なし）のリストを作成 例: 12345_a_b.jpg -> 12345
+    image_names = []
+    image_good_names = []
+    for p in all_image_paths:
+        filename = os.path.splitext(os.path.basename(p))[0]  # 拡張子を除去
+        image_names.append(filename)
+    for p in good_image_paths:
+        filename = os.path.splitext(os.path.basename(p))[0]  # 拡張子を除去
+        image_good_names.append(filename)
+    
+
+    paths_bookmarks = SetLabel.get_bookmark(image_dir, data_json, image_names) | SetLabel.get_bookmark(image_good_dir, data_json, image_good_names)
+
+    image_paths, all_image_labels, CLASS_NUM = SetLabel.set_label_front_and_back(paths_bookmarks)
+
+    k_fold(image_paths, all_image_labels)
+
+    exit()
+    
     # for image, label in train_ds.unbatch().take(20):
     #     plt.imshow(image.numpy())
     #     plt.title(f"label: {label.numpy()}")
@@ -465,8 +569,7 @@ def main():
     #     plt.show()
     # exit()
 
-    model = model_EfficientNet(IMAGE_SIZE, CLASS_NUM)
-    # model = model_mobilenet(IMAGE_SIZE)
+    model = model_VGG16(IMAGE_SIZE, CLASS_NUM)
 
     # 学習率スケジューラーの追加
     lr_scheduler = tf.keras.optimizers.schedules.ExponentialDecay(
@@ -487,18 +590,11 @@ def main():
         metrics=["accuracy"]
     )
 
-    for images, labels in train_ds.take(1):
-        print("train images.shape:", images.shape)
-    for images, labels in val_ds.take(1):
-        print("val images.shape:", images.shape)
-    for images, labels in test_ds.take(1):
-        print("test images.shape:", images.shape)
-
     reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.5,
         patience=3,
-        min_lr=0.001,
+        min_lr=1e-7,
         verbose=1
     )
     earlystop = tf.keras.callbacks.EarlyStopping(
@@ -529,7 +625,6 @@ def main():
     # --- 確率スコアの棒グラフを表示（テストデータの先頭バッチから最大5枚） ---
     for images, labels in test_ds.take(10):
         visualize_probability_scores(model, images[:5], labels[:5], class_names=[str(i) for i in range(CLASS_NUM)], max_plots=5)
-
 
     print(classification_report(y_true, y_pred, digits=4))
 

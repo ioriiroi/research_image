@@ -9,7 +9,7 @@ class SetLabel:
         for name in image_names:
             id = name.split("_")[0]
             if id in data:
-                paths_bookmarks[str(name)] = {"path": f"{image_dir}/{name}.jpg", "bookmark": data[id]["bookmark"]}
+                paths_bookmarks[str(name)] = {"path": f"{image_dir}/{name}.jpg", "bookmark": data[id]["bookmark"], "view": data[id]["view"]}
         return paths_bookmarks
                 
     def split_label(bookmark):
@@ -79,8 +79,8 @@ class SetLabel:
     def set_label_front_and_back(bookmarks):
         t = []
         for id, item in bookmarks.items():
-            image_path, bookmark = item["path"], item["bookmark"]
-            t.append((bookmark, image_path))
+            image_path, bookmark, view = item["path"], item["bookmark"], item["view"]
+            t.append((bookmark, view, image_path)) # bookmarkとviewを分ける t.sort()で勝手にbookmark同数ならview順になる
         t.sort()
 
         image_labels = []
@@ -88,8 +88,8 @@ class SetLabel:
         num = 400
 
         for i in range(num):
-            bookmark, path = t[i]
-            rev_bookmark, rev_path = t[len(t)-i-1]
+            bookmark, view, path = t[i]
+            rev_bookmark, rev_view, rev_path = t[len(t)-i-1]
             image_labels.append(0)
             paths.append(path)
             image_labels.append(1)
