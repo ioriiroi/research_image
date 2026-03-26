@@ -3,6 +3,7 @@ import os
 import json
 import time
 import sys
+import random
 
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
@@ -19,29 +20,14 @@ from src.JsonLoadAndWrite import openJson, saveJson
 
 UTC = timezone("UTC")
 JST = timezone("Asia/Tokyo")
+FILE = "遊戯王"
+WORD = f"{FILE}5000users入り"
 timeFormat = "%Y-%m-%d %H:%M:%S"
 downloadDir = config.ILLUST_GOOD_DIR
 illustJsonDir = config.DATA_JSON_DIR
-illustMikuDir = config.ILLUST_MIKU_DIR
-mikuJsonDir = config.MIKU_DATA_DIR
-maxCount = 100
+maxCount = 10
 sleepTime = 3
 tagsNG = ["R-18", "R-18G", "漫画", "AI生成", "うごイラ"]
-
-# def getContents(link) -> json:
-#     r = requests.get(link)
-#     time.sleep(1)
-
-#     soup = BeautifulSoup(r.content, "html.parser")
-#     try:
-#         contents = soup.find_all("meta", id="meta-preload-data")[0].get("content")
-#     except:
-#         return None
-#     print(contents)
-
-#     contents = json.loads(contents)
-
-#     return contents
 
 def searchDownload(api, id, detailData):
     dict = {}
@@ -80,7 +66,7 @@ def searchDownload(api, id, detailData):
         print("id {} is sensitive illust".format(id))
         return False
 
-    api.download(url, path = illustMikuDir, fname = f"{id}.jpg")
+    #api.download(url, path = illustMikuDir, fname = f"{id}.jpg")
     time.sleep(sleepTime)
 
     bookmark = pixivGetTools.getBookmarkCount(illustData, id)
@@ -138,11 +124,16 @@ def download(api, start_date, end_date, word, sort, DLfile, data_json, json_dir,
             search_results = api.search_illust(word=word, search_target='partial_match_for_tags', sort=sort, start_date=start_date, end_date=end_date, search_ai_type=1)
         time.sleep(1)
         for illust in search_results.illusts:
+            # if random.randint(1, 30) != 10:
+            #     continue
             id = illust.id
             bookmark = illust.total_bookmarks
             view = illust.total_view
             illust_url = illust.image_urls.large
             illust_type = illust.type
+
+            if bookmark < 5000:
+                continue
 
             if str(id) in data_json or illust_type != "illust":
                 continue
@@ -166,10 +157,10 @@ def main():
     api = apiLogin()
     DLfile = downloadDir
     data_json = openJson(illustJsonDir)
-    word = "NEEDYGIRLOVERDOSE10000users入り"
+    word = WORD
     sort = "date_desc"
-    start_date = "2024-9-20"
-    end_date = "2025-9-20"
+    start_date = "2024-6-15"
+    end_date = "2025-12-15"
     json_dir = illustJsonDir
     download(api, start_date, end_date, word, sort, DLfile, data_json, json_dir, maxCount)
 

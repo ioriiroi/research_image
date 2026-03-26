@@ -23,7 +23,7 @@ from sklearn.metrics import classification_report
 # --- 自作のライブラリ ---
 from model.model_normal import model_normal, model_normal_deep, model_normal_deep2, model_simple, model_balanced, model_deep_with_regularization
 from model.model_mobilenet import model_mobilenet
-from model.model_VGG16 import model_VGG16, model_EfficientNet
+from model.model_VGG16 import model_VGG16, model_EfficientNet, model_mobilenet
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from setting import config
@@ -45,6 +45,7 @@ image_good_dir = config.ILLUST_GOOD_DIR
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH_SIZE = 16
 IMAGE_SIZE = 256
+CLASS_NUM = 2
 
 
 def file_diff_check(image_path, data):
@@ -55,7 +56,7 @@ def file_diff_check(image_path, data):
             print(path)
 
 def road_image_path(image_dir):
-    all_image_paths = list(glob.glob("{}/*.jpg".format(image_dir))) # 画像パスを全て取得
+    all_image_paths = list(glob.glob("{}/*/*.jpg".format(image_dir))) # 画像パスを全て取得
     all_image_paths = natsorted(all_image_paths) # パスをソート
     return all_image_paths
 
@@ -216,7 +217,6 @@ def robust_preprocess(path, label, augment):
         
         
         image = tf.cast(image, tf.float32) / 255.0
-        #image = preprocess_input(image)
         image = tf.ensure_shape(image, [IMAGE_SIZE, IMAGE_SIZE, 3])
 
         return image, label
@@ -278,22 +278,11 @@ def visualize_confusion_matrix(model, test_ds, class_names=None):
     # 混同行列を計算
     cm = confusion_matrix(y_true, y_pred)
     
-    # 正規化された混同行列も計算
-    # cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-    
     # 元の混同行列
     plt.figure(figsize=(10, 7))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
     plt.xlabel('Predicted')
     plt.ylabel('Actual')
-    
-    # 正規化された混同行列
-    # plt.subplot(1, 2, 2)
-    # sns.heatmap(cm_normalized, annot=True, fmt='.2f', cmap='Blues',
-    #             xticklabels=class_names, yticklabels=class_names)
-    # plt.xlabel('predict')
-    # plt.ylabel('actual')
-    # plt.title('regular matrix')
     
     plt.tight_layout()
     plt.show()
@@ -367,6 +356,18 @@ def visualize_probability_scores(model, images, labels=None, class_names=None, m
     plt.tight_layout()
     plt.show()
 
+def plot_probability_scores(model, test_ds):
+    # 予測値と正解ラベルを集める
+    y_true, y_pred = [], []
+    for images, labels in test_ds:
+        preds = model.predict(images)
+        y_true.extend(labels.numpy())
+        y_pred.extend(tf.argmax(preds, axis=1).numpy())
+
+    # --- 確率スコアの棒グラフを表示（テストデータの先頭バッチから最大5枚） ---
+    for images, labels in test_ds.take(10):
+        visualize_probability_scores(model, images[:5], labels[:5], class_names=[str(i) for i in range(CLASS_NUM)], max_plots=5)
+
 def data_split(path, label):
     # 2. パスとラベルのデータセットを作成（まだ画像は読み込まない）
     ds_path = tf.data.Dataset.from_tensor_slices(path)
@@ -425,7 +426,7 @@ def data_split(path, label):
 
     return train_ds, val_ds, test_ds
 
-def k_fold(image_paths, all_image_labels):
+def k_fold(image_paths, all_image_labels, class_num):
     K = 5
     paths = np.array(image_paths)
     labels = np.array(all_image_labels)
@@ -438,14 +439,14 @@ def k_fold(image_paths, all_image_labels):
 
     fold_results = []
     models = []
-    for fold, (train_idx, val_idx) in enumerate(skf.split(tmp_path, tmp_label), 1):
-        print(f"\n=== Fold {fold}/{K} ===")
+    for fold, (train_idx, val_idx) in enumerate(skf.split(tmp_path, tmp_label)):
+        print(f"\n=== Fold {fold+1}/{K} ===")
         tf.keras.backend.clear_session()
 
-        paths_train = paths[train_idx].tolist()
-        labels_train = labels[train_idx].tolist()
-        paths_val = paths[val_idx].tolist()
-        labels_val = labels[val_idx].tolist()
+        paths_train = tmp_path[train_idx].tolist()
+        labels_train = tmp_label[train_idx].tolist()
+        paths_val = tmp_path[val_idx].tolist()
+        labels_val = tmp_label[val_idx].tolist()
 
         # Dataset を作る（path, label のまま）
         train_base = tf.data.Dataset.from_tensor_slices((paths_train, tf.cast(labels_train, tf.int64)))
@@ -454,7 +455,7 @@ def k_fold(image_paths, all_image_labels):
         # augment ブランチを作り連結（I/O を減らしたいなら cache を検討）
         train_ds1 = train_base.map(lambda p, l: robust_preprocess(p, l, augment=True), num_parallel_calls=AUTOTUNE)
         train_ds2 = train_base.map(lambda p, l: robust_preprocess_flip(p, l, augment=True), num_parallel_calls=AUTOTUNE)
-        train_ds = train_ds1.concatenate(train_ds2)#.shuffle(buffer_size=max(1024, len(paths_train)*2), reshuffle_each_iteration=True)
+        train_ds = train_ds1#.concatenate(train_ds2)#.shuffle(buffer_size=max(1024, len(paths_train)*2), reshuffle_each_iteration=True)
 
         val_ds = val_ds.map(lambda p, l: robust_preprocess(p, l, augment=False), num_parallel_calls=AUTOTUNE)
 
@@ -465,7 +466,9 @@ def k_fold(image_paths, all_image_labels):
         print(f"train size: {len(paths_train)}, val size: {len(paths_val)}")
 
         # モデルを新規作成してコンパイル
-        model = model_deep_with_regularization(IMAGE_SIZE, 2)
+        model = model_VGG16(IMAGE_SIZE, class_num)
+        
+        top_k = min(2, class_num - 1) if class_num > 1 else 1
         model.compile(optimizer=Adam(learning_rate=1e-5),
                       loss='sparse_categorical_crossentropy',
                       metrics=['accuracy'])
@@ -474,7 +477,7 @@ def k_fold(image_paths, all_image_labels):
         class_weights = calculate_balanced_weights(labels_train)
 
         callbacks = [
-            tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=1e-7, verbose=1),
+            tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, min_lr=1e-7, verbose=1),
             tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=8, restore_best_weights=True, verbose=1),
         ]
 
@@ -484,17 +487,20 @@ def k_fold(image_paths, all_image_labels):
                             verbose=1,
                             callbacks=callbacks)
         val_metrics = model.evaluate(val_ds, verbose=0)
-        fold_results.append({'fold': fold, 'val_loss': float(val_metrics[0]), 'val_acc': float(val_metrics[1])})
-        print(f"Fold {fold} result: val_loss={val_metrics[0]:.4f}, val_acc={val_metrics[1]:.4f}")
+        fold_results.append({'fold': fold, 'val_acc': float(val_metrics[1]), 'val_loss': float(val_metrics[0])})
+        print(f"Fold {fold} result: val_acc={val_metrics[1]:.4f}, val_loss={val_metrics[0]:.4f}")
 
         models.append(model)
         #show_graph(history)
     
+    # for i in range(K):
+    #     models[i].save(f"model_{i+1}.keras")
+    
     losses = [r['val_loss'] for r in fold_results]
     accs = [r['val_acc'] for r in fold_results]
     print("\n=== Cross-validation summary ===")
-    print(f"val_loss mean:{np.mean(losses):.4f}, std:{np.std(losses):.4f}")
     print(f"val_acc  mean:{np.mean(accs):.4f}, std:{np.std(accs):.4f}")
+    print(f"val_loss mean:{np.mean(losses):.4f}, std:{np.std(losses):.4f}")
     # 結果の表示
     for r in fold_results:
         print(r)
@@ -517,8 +523,8 @@ def k_fold(image_paths, all_image_labels):
         print(classification_report(y_true, y_pred, digits=4))
 
         test_metrics = model.evaluate(test_ds, verbose=0)
-        fold_results.append({'fold': fold, 'test_loss': float(test_metrics[0]), 'test_acc': float(test_metrics[1])})
-        print(f"Fold {fold} result: test_loss={test_metrics[0]:.4f}, test_acc={test_metrics[1]:.4f}")
+        fold_results.append({'fold': fold, 'test_acc': float(test_metrics[1]), 'test_loss': float(test_metrics[0])})
+        print(f"Fold {fold} result: test_acc={test_metrics[1]:.4f},  test_loss={test_metrics[0]:.4f}")
 
         class_names = [0,1,2,3]
         visualize_confusion_matrix(model, test_ds, class_names)
@@ -527,21 +533,19 @@ def k_fold(image_paths, all_image_labels):
     losses = [r['test_loss'] for r in fold_results]
     accs = [r['test_acc'] for r in fold_results]
     print("\n=== Test summary ===")
-    print(f"test_loss mean:{np.mean(losses):.4f}, std:{np.std(losses):.4f}")
     print(f"test_acc  mean:{np.mean(accs):.4f}, std:{np.std(accs):.4f}")
+    print(f"test_loss mean:{np.mean(losses):.4f}, std:{np.std(losses):.4f}")
     # 結果の表示
     for r in fold_results:
         print(r)
 
 def main():
     print(BATCH_SIZE)
-    print(image_dir)
-    print(data_dir)
     # 1. 画像パスとラベルを取得
     all_image_paths = road_image_path(image_dir)
-    good_image_paths = road_image_path(image_good_dir)
     data_json = openJson(data_dir)
-    print(len(data_json))
+
+    print(f"image num: {len(all_image_paths)}")
 
     # 画像ファイル名（拡張子なし）のリストを作成 例: 12345_a_b.jpg -> 12345
     image_names = []
@@ -549,94 +553,12 @@ def main():
     for p in all_image_paths:
         filename = os.path.splitext(os.path.basename(p))[0]  # 拡張子を除去
         image_names.append(filename)
-    for p in good_image_paths:
-        filename = os.path.splitext(os.path.basename(p))[0]  # 拡張子を除去
-        image_good_names.append(filename)
-    
 
-    paths_bookmarks = SetLabel.get_bookmark(image_dir, data_json, image_names) | SetLabel.get_bookmark(image_good_dir, data_json, image_good_names)
+    paths_bookmarks = SetLabel.get_bookmark(all_image_paths, data_json)
 
-    image_paths, all_image_labels, CLASS_NUM = SetLabel.set_label_front_and_back(paths_bookmarks)
+    image_paths, all_image_labels, CLASS_NUM = SetLabel.set_label_all(paths_bookmarks)
 
-    k_fold(image_paths, all_image_labels)
-
-    exit()
-    
-    # for image, label in train_ds.unbatch().take(20):
-    #     plt.imshow(image.numpy())
-    #     plt.title(f"label: {label.numpy()}")
-    #     plt.axis('off')
-    #     plt.show()
-    # exit()
-
-    model = model_VGG16(IMAGE_SIZE, CLASS_NUM)
-
-    # 学習率スケジューラーの追加
-    lr_scheduler = tf.keras.optimizers.schedules.ExponentialDecay(
-        initial_learning_rate=0.0005,
-        decay_steps=100,
-        decay_rate=0.96,
-        staircase=False
-    )
-
-    class_weights = calculate_balanced_weights(all_image_labels)
-    # モデルの構造確認
-    # model.summary()
-
-    # モデルのコンパイル
-    model.compile(
-        optimizer=Adam(learning_rate=1e-5),
-        loss='sparse_categorical_crossentropy',
-        metrics=["accuracy"]
-    )
-
-    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
-        monitor='val_loss',
-        factor=0.5,
-        patience=3,
-        min_lr=1e-7,
-        verbose=1
-    )
-    earlystop = tf.keras.callbacks.EarlyStopping(
-        monitor='val_loss',
-        patience=10,
-        verbose=1,
-        restore_best_weights=True
-    )
-    
-    history = model.fit(
-        train_ds, 
-        validation_data=val_ds,
-        epochs=100,
-        verbose=True,
-        #class_weight=class_weights,
-        callbacks=[reduce_lr, earlystop]
-    )
-
-    from sklearn.metrics import classification_report
-
-    # 予測値と正解ラベルを集める
-    y_true, y_pred = [], []
-    for images, labels in test_ds:
-        preds = model.predict(images)
-        y_true.extend(labels.numpy())
-        y_pred.extend(tf.argmax(preds, axis=1).numpy())
-
-    # --- 確率スコアの棒グラフを表示（テストデータの先頭バッチから最大5枚） ---
-    for images, labels in test_ds.take(10):
-        visualize_probability_scores(model, images[:5], labels[:5], class_names=[str(i) for i in range(CLASS_NUM)], max_plots=5)
-
-    print(classification_report(y_true, y_pred, digits=4))
-
-    show_graph(history)
-
-    test_loss, test_acc = model.evaluate(test_ds)
-
-    print("test accuracy: {}".format(test_acc))
-    print("test loss: {}".format(test_loss))
-
-    class_names = [0,1,2,3]
-    visualize_confusion_matrix(model, test_ds, class_names)
+    k_fold(image_paths, all_image_labels, CLASS_NUM)
 
 if __name__ == "__main__":
     main()
