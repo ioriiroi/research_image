@@ -1,0 +1,227 @@
+2層 dropoutなし
+test accuracy: 0.375
+test loss: 1.4979398250579834
+
+2層 クラスバランス追加
+test accuracy: 0.375
+test loss: 1.3241136074066162
+
+2層 画像拡張の追加
+test accuracy: 0.5
+test loss: 1.2342150211334229
+
+1層
+test accuracy: 0.375
+test loss: 1.2302926778793335
+
+1層 クラスバランス追加
+test accuracy: 0.5
+test loss: 1.113538146018982
+
+1層 画像拡張の追加
+test accuracy: 0.375
+test loss: 1.652808427810669
+
+1層 重み緩やか
+クラス 0 の重み: 1.04
+クラス 1 の重み: 0.83
+クラス 2 の重み: 1.04
+クラス 3 の重み: 1.21
+test accuracy: 0.25
+test loss: 1.5074690580368042
+
+3層 
+test accuracy: 0.25
+test loss: 1.388242244720459
+
+deep2
+test accuracy: 0.4375
+test loss: 1.9665676355361938
+
+deep2 重み調整　クラスバランス追加
+test accuracy: 0.1875
+test loss: 2.6663994789123535
+
+simple
+test accuracy: 0.3125
+test loss: 1.430060625076294
+
+simple クラスバランス追加
+クラス 0 の重み: 1.04
+クラス 1 の重み: 0.83
+クラス 2 の重み: 1.04
+クラス 3 の重み: 1.21
+test accuracy: 0.4375
+test loss: 1.376495599746704
+
+simple batchsize4
+test accuracy: 0.375
+test loss: 1.3601341247558594
+
+simple 画像拡張の追加
+test accuracy: 0.625
+test loss: 1.2788738012313843
+
+balanced クラスバランス追加
+クラス 0 の重み: 1.04
+クラス 1 の重み: 0.83
+クラス 2 の重み: 1.04
+クラス 3 の重み: 1.21
+test accuracy: 0.375
+test loss: 1.3509893417358398
+
+balanced　浅い? 使わないほうが良い
+test accuracy: 0.3543689250946045
+test loss: 1.3754340410232544
+予想がほぼ2だった
+
+deep_with_regular
+test accuracy: 0.5
+test loss: 1.5366737842559814
+
+deep_with_regular 
+スケジューラの変更
+test accuracy: 0.4126213490962982
+test loss: 1.7156676054000854
+バッチサイズ16
+test accuracy: 0.4375
+test loss: 1.5702717304229736
+バッチサイズ4
+test accuracy: 0.3300970792770386
+test loss: 1.7819221019744873
+
+2層batch8
+test accuracy: 0.30582523345947266
+test loss: 1.4674745798110962
+3層batch16 l2=0.0005
+test accuracy: 0.34951457381248474
+test loss: 1.4296138286590576
+3層batch16 l2=0.005
+test accuracy: 0.3203883469104767
+test loss: 1.4863755702972412
+正規化を強くするとデータがちゃんと散る
+3層batch16 l2=0.001
+test accuracy: 0.34951457381248474
+test loss: 1.4826252460479736
+正規化強すぎ?
+
+重み付なし, データ拡張5, l2=0.005
+test accuracy: 0.3543689250946045
+test loss: 2.3719217777252197
+
+
+自分の正解率
+predict actual
+2 1 x
+1 3 x
+3 3 o
+0 1 x
+2 3 x
+0 1 x
+3 3 o
+0 2 x
+2 1 x
+3 3 o
+
+正解率: 3/10
+二値分類的: 6/10
+
+正規化があると予想散らばらない
+
+
+モデルのラベルづけがずれていた
+修正版
+~10 or 50~
+deep_with_regular l2:0.005 Miku
+クラスバランス 1:1
+              precision    recall  f1-score   support
+
+           0     0.6481    0.8077    0.7192       130
+           1     0.7727    0.5986    0.6746       142
+
+    accuracy                         0.6985       272
+   macro avg     0.7104    0.7031    0.6969       272
+weighted avg     0.7132    0.6985    0.6959       272
+
+test accuracy: 0.6985294222831726
+test loss: 0.9580196142196655
+
+deep_with_regular l2:0.005 random
+クラス 0: 498 サンプル (61.94%)
+クラス 1: 306 サンプル (38.06%)
+              precision    recall  f1-score   support
+
+           0     0.7653    0.7812    0.7732        96
+           1     0.6613    0.6406    0.6508        64
+
+    accuracy                         0.7250       160
+   macro avg     0.7133    0.7109    0.7120       160
+weighted avg     0.7237    0.7250    0.7242       160
+
+test accuracy: 0.7250000238418579
+test loss: 0.7509865164756775
+
+載せる用 size256
+              precision    recall  f1-score   support
+
+           0     0.8132    0.7708    0.7914        96
+           1     0.6812    0.7344    0.7068        64
+
+    accuracy                         0.7562       160
+   macro avg     0.7472    0.7526    0.7491       160
+weighted avg     0.7604    0.7562    0.7576       160
+
+test accuracy: 0.7562500238418579
+test loss: 0.724902868270874
+
+size1024
+              precision    recall  f1-score   support
+
+           0     0.7477    0.8333    0.7882        96
+           1     0.6981    0.5781    0.6325        64
+
+    accuracy                         0.7312       160
+   macro avg     0.7229    0.7057    0.7103       160
+weighted avg     0.7278    0.7312    0.7259       160
+
+test accuracy: 0.731249988079071
+test loss: 0.8923012018203735
+
+crop&paddind
+              precision    recall  f1-score   support
+
+           0     0.7345    0.8646    0.7943        96
+           1     0.7234    0.5312    0.6126        64
+
+    accuracy                         0.7312       160
+   macro avg     0.7290    0.6979    0.7034       160
+weighted avg     0.7301    0.7312    0.7216       160
+test accuracy: 0.731249988079071
+test loss: 0.8665477633476257
+
+画像ちょっと選定後 (人型限定)
+              precision    recall  f1-score   support
+
+           0     0.7326    0.7326    0.7326        86
+           1     0.6034    0.6034    0.6034        58
+
+    accuracy                         0.6806       144
+   macro avg     0.6680    0.6680    0.6680       144
+weighted avg     0.6806    0.6806    0.6806       144
+test accuracy: 0.6805555820465088
+test loss: 0.9349399209022522
+
+完全に人メイン選定
+              precision    recall  f1-score   support
+
+           0     0.7941    0.7826    0.7883        69
+           1     0.6591    0.6744    0.6667        43
+
+    accuracy                         0.7411       112
+   macro avg     0.7266    0.7285    0.7275       112
+weighted avg     0.7423    0.7411    0.7416       112
+
+test accuracy: 0.7410714030265808
+test loss: 0.9578436017036438
+
+813 -> 614 クラスバランスがほぼ均等　正規分布だとしたら上下何％？

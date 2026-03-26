@@ -8,4 +8,8 @@ numpy
 tensorflow
 natsort
 pillow
-cv2
+matplotlib
+opencv-contrib-python
+scikit-learn
+albumentations
+seaborn

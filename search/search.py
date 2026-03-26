@@ -3,42 +3,31 @@ import os
 import json
 import time
 import sys
+import random
 
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from pytz import timezone
 from pixivpy3 import *
 
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import setting.config as config
 import lib.pixivGetTools as pixivGetTools
 import lib.pixivApiTools as pixivApi
-import lib.jsonLoadAndWrite as jsonLoadAndWrite
+from src.JsonLoadAndWrite import openJson, saveJson
 
 UTC = timezone("UTC")
 JST = timezone("Asia/Tokyo")
+FILE = "遊戯王"
+WORD = f"{FILE}5000users入り"
 timeFormat = "%Y-%m-%d %H:%M:%S"
-illustId = "1"
-downloadDir = config.DOWNLOAD_DIR
-illustJsonDir = "../data/illustData.json"
-searchedJsonDir = "../data/searched.json"
-maxCount = 100
+downloadDir = config.ILLUST_GOOD_DIR
+illustJsonDir = config.DATA_JSON_DIR
+maxCount = 10
 sleepTime = 3
 tagsNG = ["R-18", "R-18G", "漫画", "AI生成", "うごイラ"]
-
-# def getContents(link) -> json:
-#     r = requests.get(link)
-#     time.sleep(1)
-
-#     soup = BeautifulSoup(r.content, "html.parser")
-#     try:
-#         contents = soup.find_all("meta", id="meta-preload-data")[0].get("content")
-#     except:
-#         return None
-#     print(contents)
-
-#     contents = json.loads(contents)
-
-#     return contents
 
 def searchDownload(api, id, detailData):
     dict = {}
@@ -77,7 +66,7 @@ def searchDownload(api, id, detailData):
         print("id {} is sensitive illust".format(id))
         return False
 
-    api.download(url, path = downloadDir, fname = "{}.jpg".format(id))
+    #api.download(url, path = illustMikuDir, fname = f"{id}.jpg")
     time.sleep(sleepTime)
 
     bookmark = pixivGetTools.getBookmarkCount(illustData, id)
@@ -96,24 +85,20 @@ def apiLogin() -> AppPixivAPI:
     api = AppPixivAPI()
     api.auth(refresh_token=config.REFRESH_TOKEN)
     return api
-
-def main():
-    api = apiLogin()
-    args = sys.argv
-
-    if len(args) > 1:
-        maxCount = int(args[1])
-
+""" --------- """
+def main_archive(api):
     # 1日前の日付を取得
-    yesterday = datetime.now() - timedelta(days=1)
+    yesterday = datetime.now() - timedelta(days=365)
     date_str = yesterday.strftime('%Y-%m-%d')
 
-    detailData = jsonLoadAndWrite.openJson(illustJsonDir)
-    searched = jsonLoadAndWrite.openJson(searchedJsonDir)
+    # detailData = openJson(illustJsonDir)
+    # searched = openJson(searchedJsonDir)
+    detailData = openJson(mikuJsonDir)
 
-    dataMaxId = searched["id"] + 1
+    # dataMaxId = searched["id"] + 1
+    dataMaxId = 1
     
-    minId = max(pixivApi.getOldIllustId(api, "", date_str), dataMaxId)
+    minId = max(pixivApi.getOldIllustId(api, "初音ミク", date_str), dataMaxId)
     
     count = 0
     nowId = minId
@@ -125,11 +110,61 @@ def main():
         nowId += 1
 
     # まとめてJSONを更新
-    jsonLoadAndWrite.saveJson(illustJsonDir, detailData)
+    saveJson(mikuJsonDir, detailData)
     searched = {"id": nowId - 1}
-    jsonLoadAndWrite.saveJson(searchedJsonDir, searched)
+    # saveJson(searchedJsonDir, searched)
 
-    print("illusts: {} files".format(len(detailData)))
+def download(api, start_date, end_date, word, sort, DLfile, data_json, json_dir, limit):
+    count = 0
+    next_qs = None
+    while (count < limit):
+        if next_qs:
+            search_results = api.search_illust(**next_qs)
+        else:
+            search_results = api.search_illust(word=word, search_target='partial_match_for_tags', sort=sort, start_date=start_date, end_date=end_date, search_ai_type=1)
+        time.sleep(1)
+        for illust in search_results.illusts:
+            # if random.randint(1, 30) != 10:
+            #     continue
+            id = illust.id
+            bookmark = illust.total_bookmarks
+            view = illust.total_view
+            illust_url = illust.image_urls.large
+            illust_type = illust.type
+
+            if bookmark < 5000:
+                continue
+
+            if str(id) in data_json or illust_type != "illust":
+                continue
+
+            api.download(illust_url, path = DLfile, fname = f"{id}.jpg")
+            time.sleep(1)
+
+            data_json[str(id)] = {"id": id, "bookmark": bookmark, "view": view}
+            print(f"downloaded! id: {id}")
+            saveJson(json_dir, data_json)
+
+            count += 1
+            if count >= limit:
+                break
+        next_qs = api.parse_qs(search_results.next_url)
+        if next_qs == None:
+            break
+
+
+def main():
+    api = apiLogin()
+    DLfile = downloadDir
+    data_json = openJson(illustJsonDir)
+    word = WORD
+    sort = "date_desc"
+    start_date = "2024-6-15"
+    end_date = "2025-12-15"
+    json_dir = illustJsonDir
+    download(api, start_date, end_date, word, sort, DLfile, data_json, json_dir, maxCount)
+
+    print("illusts: {} files".format(len(data_json)))
 
 if __name__ == "__main__":
     main()

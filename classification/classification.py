@@ -6,42 +6,60 @@ import csv
 import glob
 import cv2
 import os
+import sys
 
 from natsort import natsorted
 from tensorflow import keras
-from tensorflow.python.keras import layers
-from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
-from tensorflow.python.keras.models import Sequential
 from keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
+from tensorflow.keras.applications.efficientnet import preprocess_input
+from tensorflow.keras import layers, Sequential
+from keras.preprocessing import image
+from keras import models
+from keras.layers import MaxPooling2D, GlobalAveragePooling2D, Conv2D
+from sklearn.model_selection import StratifiedKFold, KFold
+from sklearn.metrics import classification_report
 
 # --- 自作のライブラリ ---
-import model.model_normal as model_normal
-import model.model_mobilenet as model_mobilenet
-import setting.config as config
-from lib.JsonLoadAndWrite import openJson
+from model.model_normal import model_normal, model_normal_deep, model_normal_deep2, model_simple, model_balanced, model_deep_with_regularization
+from model.model_mobilenet import model_mobilenet
+from model.model_VGG16 import model_VGG16, model_EfficientNet, model_mobilenet
 
-mid = 4057
-csv_path = "data.csv"
-data_dir = config.ILLUST_DIR
-test_dir = "testdata"
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from setting import config
+from lib.set_label import SetLabel
+from src.JsonLoadAndWrite import openJson
+
+# 警告を非表示にする
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # 0=全て, 1=INFO以外, 2=WARNING以外, 3=ERROR以外
+tf.get_logger().setLevel('ERROR')
+
+# Check for TensorFlow GPU access
+print(f"TensorFlow has access to the following devices:\n{tf.config.list_physical_devices()}")
+# See TensorFlow version
+print(f"TensorFlow version: {tf.__version__}")
+
+data_dir = config.DATA_JSON_DIR
+image_dir = config.DOWNLOAD_DIR
+image_good_dir = config.ILLUST_GOOD_DIR
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH_SIZE = 16
-IMAGE_SIZE = 198
+IMAGE_SIZE = 256
+CLASS_NUM = 2
 
-def road_image_path(data_dir):
-    all_image_paths = list(glob.glob("{}/*/*.jpg".format(data_dir))) # 画像パスを全て取得
+
+def file_diff_check(image_path, data):
+    for path in image_path:
+        path = os.path.splitext(os.path.basename(path))[0]
+
+        if path not in data:
+            print(path)
+
+def road_image_path(image_dir):
+    all_image_paths = list(glob.glob("{}/*/*.jpg".format(image_dir))) # 画像パスを全て取得
     all_image_paths = natsorted(all_image_paths) # パスをソート
-
     return all_image_paths
 
-def preprocess_image(path):
-    image = tf.io.read_file(path)
-    image = tf.image.decode_jpeg(image, channels=3)
-    image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
-    image /= 255.0
-
-    return image
 
 def load_csv(csv_path):
     with open(csv_path) as f:
@@ -50,27 +68,167 @@ def load_csv(csv_path):
 
     return csv_list
 
-def set_label(csv_path, all_image_paths):
-    csv_list = load_csv(csv_path)
+""" AIが作成 """
+def check_class_balance(labels):
+    """クラスの分布を確認し、クラス重みを計算する"""
+    unique, counts = np.unique(labels, return_counts=True)
+    total = len(labels)
+    
+    print("クラスバランス:")
+    for cls, count in zip(unique, counts):
+        print(f"クラス {cls}: {count} サンプル ({count/total*100:.2f}%)")
+    
+    # クラス重みを計算
+    class_weights = {}
+    max_count = max(counts)
+    for cls, count in zip(unique, counts):
+        class_weights[int(cls)] = max_count / count
+    
+    return class_weights
 
-    all_image_labels = []
-    for i in range(len(all_image_paths)):
-        path = os.path.split(all_image_paths[i])[1]
-        no = int(path[:3]) # 画像番号
+def calculate_balanced_weights(labels):
+    """より穏やかなクラス重みを計算する"""
+    unique, counts = np.unique(labels, return_counts=True)
+    total = len(labels)
+    
+    print("クラスバランス:")
+    for cls, count in zip(unique, counts):
+        print(f"クラス {cls}: {count} サンプル ({count/total*100:.2f}%)")
+    
+    # 穏やかなクラス重みを計算
+    class_weights = {}
+    avg_count = sum(counts) / len(counts)
+    for cls, count in zip(unique, counts):
+        # 平方根スケーリングで穏やかな重みを計算
+        weight = np.sqrt(avg_count / count)
+        # 重みを制限して極端な値を避ける
+        weight = min(max(weight, 0.5), 2.0)
+        class_weights[int(cls)] = weight
+        print(f"クラス {cls} の重み: {weight:.2f}")
+    
+    return class_weights
 
-        like = int(csv_list[no][3]) # 画像番号に対するいいね数
+def simple_rotation_augmentation(image, min_angle, max_angle):
+    """
+    シンプルな回転拡張（tf.py_functionを使用）
+    """
+    def rotate_image(img, angle):
+        # NumPyとPILを使用した回転
+        from PIL import Image
+        import numpy as np
+        
+        # TensorFlowテンソルをNumPy配列に変換
+        img_np = img.numpy()
+        
+        # uint8に変換（PILで処理するため）
+        if img_np.dtype == np.float32:
+            img_np = (img_np * 255).astype(np.uint8)
+        
+        # PIL Imageに変換
+        pil_img = Image.fromarray(img_np)
+        
+        # 回転
+        rotated_pil = pil_img.rotate(angle, fillcolor=(0, 0, 0), expand=False)
+        
+        # NumPy配列に戻す
+        rotated_np = np.array(rotated_pil)
+        
+        # float32に正規化
+        if img.dtype == tf.float32:
+            rotated_np = rotated_np.astype(np.float32) / 255.0
+        
+        return rotated_np
+    
+    # ランダムな角度を生成
+    angle = tf.random.uniform([], min_angle, max_angle)
+    
+    # tf.py_functionを使用してPython関数を呼び出し
+    rotated_image = tf.py_function(
+        lambda img, ang: rotate_image(img, ang),
+        [image, angle],
+        tf.float32
+    )
+    
+    # 形状を明示的に設定
+    rotated_image.set_shape(image.shape)
+    
+    return rotated_image
 
-        # いいねが中央値より大きければ1 (データの取り方変えればいらなくなるかも)
-        if like > mid:
-            all_image_labels.append(1)
-        else:
-            all_image_labels.append(0)
+def resize_with_padding_tf(image, size):
+    """
+    アスペクト比を保持してリサイズし、パディングで正方形(size x size)にする（TensorFlow ops）
+    image: uint8 / float tensor with shape [H, W, 3]
+    size: int (出力の長さ)
+    """
+    image = tf.convert_to_tensor(image)
+    orig_shape = tf.shape(image)
+    h = tf.cast(orig_shape[0], tf.float32)
+    w = tf.cast(orig_shape[1], tf.float32)
+    size_f = tf.cast(size, tf.float32)
 
-    return all_image_labels
+    scale = size_f / tf.maximum(h, w)
+    new_h = tf.cast(tf.round(h * scale), tf.int32)
+    new_w = tf.cast(tf.round(w * scale), tf.int32)
 
-def change_range(image,label):
-    return 2*image-1, label
+    # リサイズ（補間は縮小時はAREA、拡大時はBILINEARを自動選択）
+    resized = tf.image.resize(image, [new_h, new_w], method=tf.image.ResizeMethod.BILINEAR)
 
+    # パディング量を計算して中央寄せ
+    pad_h = size - new_h
+    pad_w = size - new_w
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    # padded は float または uint8 を受け取れる。ここでは中間値128（グレー）で埋める
+    padded = tf.pad(resized,
+                    [[pad_top, pad_bottom], [pad_left, pad_right], [0, 0]],
+                    constant_values=128)
+
+    # 念のため最終サイズを整える
+    padded = tf.image.resize_with_crop_or_pad(padded, size, size)
+    return padded
+
+augment_layer = Sequential([
+    layers.RandomRotation(0.4),
+    layers.RandomTranslation(0, 0.2),
+    layers.RandomTranslation(0.2, 0),
+    layers.RandomZoom(0.2, 0.2),
+    layers.RandomFlip("horizontal_and_vertical"),
+    layers.RandomContrast(0.2),
+], name="augmentation_layer")
+
+def robust_preprocess(path, label, augment):
+    try:
+        image = tf.io.read_file(path)
+        image = tf.image.decode_image(image, channels=3, expand_animations=False)
+
+        shape_tensor = tf.shape(image) # 画像サイズを取得
+        max_size = tf.reduce_max(shape_tensor) # 画像の長辺を取得
+        # アスペクト比を保ったままの切り取り
+        image = tf.image.resize_with_crop_or_pad(image, max_size, max_size)
+        image = tf.image.resize(image, [IMAGE_SIZE, IMAGE_SIZE])
+
+        # augment フラグが True の場合、Keras の前処理レイヤーを適用
+        if augment:
+            # レイヤーはバッチ単位（[H,W,3] でも動作する）だが、tf.data.map内で確実に動かすため training=True を指定
+            image = augment_layer(image, training=True)
+        
+        
+        image = tf.cast(image, tf.float32) / 255.0
+        image = tf.ensure_shape(image, [IMAGE_SIZE, IMAGE_SIZE, 3])
+
+        return image, label
+    except Exception as e:
+        tf.print("処理エラー:", path)
+        return tf.zeros([IMAGE_SIZE, IMAGE_SIZE, 3], dtype=tf.float32), label
+
+def robust_preprocess_flip(path, label, augment):
+    image, label = robust_preprocess(path, label, augment)
+    image = tf.image.flip_left_right(image)  # 必ず反転
+    return image, label
+""""""
 
 def show_graph(history):
     plt.plot(history.history['accuracy'], label='accuracy')
@@ -88,80 +246,319 @@ def show_graph(history):
     plt.legend(loc='lower right')
     plt.show()
 
-def main():      
-    all_image_paths = road_image_path(data_dir)
-    ds_path = tf.data.Dataset.from_tensor_slices(all_image_paths)
-    ds_image = ds_path.map(preprocess_image) # 画像の読み込み
-
-    all_image_labels = set_label(csv_path, all_image_paths) #各画像にラベル付
-
-    ds_labels = tf.data.Dataset.from_tensor_slices(tf.cast(all_image_labels, tf.int64))
-
-    ds_image_label = tf.data.Dataset.zip((ds_image, ds_labels))
-
+def visualize_confusion_matrix(model, test_ds, class_names=None):
+    """
+    モデルのテストデータに対する予測結果を混同行列として可視化する
     
-    """ 簡易的なテストケース """
-    test_image_paths = list(glob.glob("{}/*/*.jpeg".format(test_dir)))
-    test_image_paths = natsorted(test_image_paths)
-    test_image = tf.data.Dataset.from_tensor_slices(test_image_paths)
-    ds_test_image = test_image.map(preprocess_image)
-
-    test_label = []
-
-    for path in test_image_paths:
-        path = os.path.split(path)[0]
-        test_label.append(int(path[-1]))
-
-    ds_test_labels = tf.data.Dataset.from_tensor_slices(tf.cast(test_label, tf.int64))
-    test_image_label = tf.data.Dataset.zip((ds_test_image, ds_test_labels))
-
-    test_image_label = test_image_label.batch(BATCH_SIZE)
-    test_image_label = test_image_label.prefetch(buffer_size=AUTOTUNE)
-
-    # train_x, valid_x, train_y, valid_y = train_test_split(all_image_paths, all_image_labels, test_size=0.2)
-
-    image_count = len(all_image_paths)
-    val_size = int(image_count * 0.3)
-    train_ds = ds_image_label.skip(val_size)
-    val_ds = ds_image_label.take(val_size)
-
-    train_ds_num = tf.data.experimental.cardinality(train_ds).numpy()
-    val_ds_num = tf.data.experimental.cardinality(val_ds).numpy()
-
-    print(image_count)
-    print(train_ds_num, val_ds_num)
-
-
-    train_ds = ds_image_label.apply(tf.data.experimental.shuffle_and_repeat(buffer_size=train_ds_num))
-    train_ds = train_ds.batch(BATCH_SIZE)
-    train_ds = train_ds.prefetch(buffer_size=AUTOTUNE)
-    val_ds = val_ds.batch(BATCH_SIZE)
-    val_ds = val_ds.prefetch(buffer_size=AUTOTUNE)
-
-    # (-1, 1)に正規化
-    # train_ds = train_ds.map(change_range)
-
-    model = model_normal(IMAGE_SIZE)
-
-    # モデルのコンパイル
-    model.compile(optimizer=Adam(learning_rate=0.001), 
-            loss='sparse_categorical_crossentropy',
-            metrics=["accuracy"])
+    Parameters:
+    - model: 評価するモデル
+    - test_ds: テストデータセット
+    - class_names: クラス名のリスト (省略可能)
+    """
+    import sklearn.metrics
+    from sklearn.metrics import confusion_matrix
+    import seaborn as sns
     
-    history = model.fit(train_ds, validation_data=val_ds, epochs=100, steps_per_epoch=train_ds_num // BATCH_SIZE,
-              verbose=True,
-                callbacks=[keras.callbacks.EarlyStopping(monitor='val_loss',
-                            min_delta=0, patience=10,verbose=1)])
+    if class_names is None:
+        class_names = ['クラス0', 'クラス1', 'クラス2', 'クラス3']
+    
+    # 予測と実際のラベルを収集
+    y_pred = []
+    y_true = []
+    
+    # テストデータセットに対する予測
+    for images, labels in test_ds:
+        predictions = model.predict(images)
+        pred_classes = tf.argmax(predictions, axis=1)
+        
+        # バッチ処理されているため、結果をリストに追加
+        y_pred.extend(pred_classes.numpy())
+        y_true.extend(labels.numpy())
+    
+    # 混同行列を計算
+    cm = confusion_matrix(y_true, y_pred)
+    
+    # 元の混同行列
+    plt.figure(figsize=(10, 7))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    
+    plt.tight_layout()
+    plt.show()
 
-    show_graph(history)
+def visualize_probability_scores(model, images, labels=None, class_names=None, max_plots=5, figsize=(12, 3)):
+    """
+    画像ごとの確率スコアを棒グラフで表示する。
+    - images: バッチ画像（Tensor or numpy array）, shape=(N, H, W, C) または単一画像 (H,W,C)
+    - labels: 真のラベル（オプション）
+    - class_names: クラス名リスト（省略時はクラスインデックスを使用）
+    - max_plots: 表示するサンプル数（バッチ内で先頭から）
+    """
+    import math
 
-    test_loss, test_acc = model.evaluate(
-		test_image_label,
-		steps=1
+    # バッチ化されていない単一画像を対応
+    imgs = images.numpy() if isinstance(images, tf.Tensor) else images
+    is_single = imgs.ndim == 3
+    if is_single:
+        imgs = imgs[np.newaxis, ...]
+        if labels is not None:
+            labels = np.array([labels.numpy()]) if isinstance(labels, tf.Tensor) else np.array([labels])
+
+    # 予測確率
+    preds = model.predict(imgs)
+    probs = tf.nn.softmax(preds, axis=1).numpy()
+
+    num_plots = min(max_plots, imgs.shape[0])
+    # 2行 (画像, 棒グラフ) x num_plots 列
+    fig_width = figsize[0] * num_plots
+    fig_height = figsize[1] * 2
+    fig, axes = plt.subplots(2, num_plots, figsize=(fig_width, fig_height))
+    # axes の形を統一
+    if num_plots == 1:
+        axes = np.expand_dims(axes, axis=1)  # (2,1)
+
+    for i in range(num_plots):
+        ax_img = axes[0, i]
+        ax_bar = axes[1, i]
+
+        img = imgs[i]
+        # uint8 (0-255) の場合はそのまま、float の場合は 0-1 を想定して表示
+        if img.dtype == np.float32 or img.dtype == np.float64:
+            disp_img = np.clip(img, 0.0, 1.0)
+        else:
+            disp_img = img.astype(np.uint8)
+            # 正規化されていない(0-255)を0-1にすることで matplotlib の挙動を安定させる
+            if disp_img.max() > 1:
+                disp_img = (disp_img / 255.0).astype(np.float32)
+
+        ax_img.imshow(disp_img)
+        ax_img.axis('off')
+
+        pred_cls = int(np.argmax(probs[i]))
+        pred_prob = float(np.max(probs[i]))
+        title = f"pred:{pred_cls} ({pred_prob:.2f})"
+        if labels is not None:
+            true_cls = int(labels[i].numpy()) if isinstance(labels[i], tf.Tensor) else int(labels[i])
+            title = f"true:{true_cls}\n" + title
+        ax_img.set_title(title)
+
+        xs = np.arange(probs.shape[1])
+        ax_bar.bar(xs, probs[i], color='tab:blue')
+        ax_bar.set_ylim(0, 1)
+        ax_bar.set_xticks(xs)
+        if class_names is not None:
+            ax_bar.set_xticklabels(class_names, rotation=45, ha='right')
+        else:
+            ax_bar.set_xticklabels([str(x) for x in xs], rotation=45, ha='right')
+        ax_bar.set_ylabel("probability")
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_probability_scores(model, test_ds):
+    # 予測値と正解ラベルを集める
+    y_true, y_pred = [], []
+    for images, labels in test_ds:
+        preds = model.predict(images)
+        y_true.extend(labels.numpy())
+        y_pred.extend(tf.argmax(preds, axis=1).numpy())
+
+    # --- 確率スコアの棒グラフを表示（テストデータの先頭バッチから最大5枚） ---
+    for images, labels in test_ds.take(10):
+        visualize_probability_scores(model, images[:5], labels[:5], class_names=[str(i) for i in range(CLASS_NUM)], max_plots=5)
+
+def data_split(path, label):
+    # 2. パスとラベルのデータセットを作成（まだ画像は読み込まない）
+    ds_path = tf.data.Dataset.from_tensor_slices(path)
+    ds_labels = tf.data.Dataset.from_tensor_slices(tf.cast(label, tf.int64))
+    ds_path_label = tf.data.Dataset.zip((ds_path, ds_labels))
+
+    # 3. データをシャッフル
+    ds_shuffled = ds_path_label.shuffle(buffer_size=1000, seed=42, reshuffle_each_iteration=False)
+    
+    # 4. データセットの総数を確認
+    dataset_size = tf.data.experimental.cardinality(ds_shuffled).numpy()
+    print(f"データセット総数: {dataset_size}")
+    
+    # 5. データを分割比率を設定
+    # テスト:検証:訓練 = 2:1:7 の比率
+    test_size = int(dataset_size * 0.2)  # 20%をテスト用
+    val_size = int(dataset_size * 0.1)   # 10%を検証用
+    train_size = dataset_size - test_size - val_size  # 残りを訓練用
+    
+    # 6. データセットを分割（パスとラベルのペアを分割）
+    test_ds = ds_shuffled.take(test_size)
+    remaining_ds = ds_shuffled.skip(test_size)
+    val_ds = remaining_ds.take(val_size)
+    train_ds = remaining_ds.skip(val_size)
+    # 通常画像データセット
+    train_ds1 = train_ds.map(lambda path, label: robust_preprocess(path, label, augment=True), num_parallel_calls=AUTOTUNE)
+    # 左右反転画像データセット
+    train_ds2 = train_ds.map(lambda path, label: robust_preprocess_flip(path, label, augment=True), num_parallel_calls=AUTOTUNE)
+    # 連結して2倍に
+    train_ds = train_ds1.concatenate(train_ds2)
+    
+    val_ds = val_ds.map(
+        lambda path, label: robust_preprocess(path, label, augment=False),
+        num_parallel_calls=AUTOTUNE
     )
+    
+    test_ds = test_ds.map(
+        lambda path, label: robust_preprocess(path, label, augment=False),
+        num_parallel_calls=AUTOTUNE
+    )
+    
+    # 7. データセットサイズを確認
+    train_ds_size = tf.data.experimental.cardinality(train_ds).numpy()
+    val_ds_size = tf.data.experimental.cardinality(val_ds).numpy()
+    test_ds_size = tf.data.experimental.cardinality(test_ds).numpy()
+    
+    print(f"訓練データ数: {train_ds_size}")
+    print(f"検証データ数: {val_ds_size}")
+    print(f"テストデータ数: {test_ds_size}")
+    print(f"合計: {train_ds_size + val_ds_size + test_ds_size}")
+    
+    # 8. バッチ処理とプリフェッチの設定
+    train_ds = train_ds.batch(BATCH_SIZE, drop_remainder=False).prefetch(buffer_size=AUTOTUNE)
+    val_ds = val_ds.batch(BATCH_SIZE, drop_remainder=False).prefetch(buffer_size=AUTOTUNE)
+    test_ds = test_ds.batch(BATCH_SIZE, drop_remainder=False).prefetch(buffer_size=AUTOTUNE)
 
-    print("test accuracy: {}".format(test_acc))
-    print("test loss: {}".format(test_loss))
+    return train_ds, val_ds, test_ds
+
+def k_fold(image_paths, all_image_labels, class_num):
+    K = 5
+    paths = np.array(image_paths)
+    labels = np.array(all_image_labels)
+    skf = StratifiedKFold(n_splits=K, shuffle=True, random_state=42)
+
+    tmp_path, test_path, tmp_label, test_label = train_test_split(paths, labels, test_size=0.2, random_state=42, stratify=labels)
+
+    test_path = test_path.tolist()
+    test_label = test_label.tolist()
+
+    fold_results = []
+    models = []
+    for fold, (train_idx, val_idx) in enumerate(skf.split(tmp_path, tmp_label)):
+        print(f"\n=== Fold {fold+1}/{K} ===")
+        tf.keras.backend.clear_session()
+
+        paths_train = tmp_path[train_idx].tolist()
+        labels_train = tmp_label[train_idx].tolist()
+        paths_val = tmp_path[val_idx].tolist()
+        labels_val = tmp_label[val_idx].tolist()
+
+        # Dataset を作る（path, label のまま）
+        train_base = tf.data.Dataset.from_tensor_slices((paths_train, tf.cast(labels_train, tf.int64)))
+        val_ds = tf.data.Dataset.from_tensor_slices((paths_val, tf.cast(labels_val, tf.int64)))
+
+        # augment ブランチを作り連結（I/O を減らしたいなら cache を検討）
+        train_ds1 = train_base.map(lambda p, l: robust_preprocess(p, l, augment=True), num_parallel_calls=AUTOTUNE)
+        train_ds2 = train_base.map(lambda p, l: robust_preprocess_flip(p, l, augment=True), num_parallel_calls=AUTOTUNE)
+        train_ds = train_ds1#.concatenate(train_ds2)#.shuffle(buffer_size=max(1024, len(paths_train)*2), reshuffle_each_iteration=True)
+
+        val_ds = val_ds.map(lambda p, l: robust_preprocess(p, l, augment=False), num_parallel_calls=AUTOTUNE)
+
+        # batch / prefetch
+        train_ds = train_ds.batch(BATCH_SIZE, drop_remainder=True).prefetch(AUTOTUNE)
+        val_ds = val_ds.batch(BATCH_SIZE, drop_remainder=False).prefetch(AUTOTUNE)
+
+        print(f"train size: {len(paths_train)}, val size: {len(paths_val)}")
+
+        # モデルを新規作成してコンパイル
+        model = model_VGG16(IMAGE_SIZE, class_num)
+        
+        top_k = min(2, class_num - 1) if class_num > 1 else 1
+        model.compile(optimizer=Adam(learning_rate=1e-5),
+                      loss='sparse_categorical_crossentropy',
+                      metrics=['accuracy'])
+
+        # class weights（必要なら）
+        class_weights = calculate_balanced_weights(labels_train)
+
+        callbacks = [
+            tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, min_lr=1e-7, verbose=1),
+            tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=8, restore_best_weights=True, verbose=1),
+        ]
+
+        history = model.fit(train_ds,
+                            validation_data=val_ds,
+                            epochs=50,
+                            verbose=1,
+                            callbacks=callbacks)
+        val_metrics = model.evaluate(val_ds, verbose=0)
+        fold_results.append({'fold': fold, 'val_acc': float(val_metrics[1]), 'val_loss': float(val_metrics[0])})
+        print(f"Fold {fold} result: val_acc={val_metrics[1]:.4f}, val_loss={val_metrics[0]:.4f}")
+
+        models.append(model)
+        #show_graph(history)
+    
+    # for i in range(K):
+    #     models[i].save(f"model_{i+1}.keras")
+    
+    losses = [r['val_loss'] for r in fold_results]
+    accs = [r['val_acc'] for r in fold_results]
+    print("\n=== Cross-validation summary ===")
+    print(f"val_acc  mean:{np.mean(accs):.4f}, std:{np.std(accs):.4f}")
+    print(f"val_loss mean:{np.mean(losses):.4f}, std:{np.std(losses):.4f}")
+    # 結果の表示
+    for r in fold_results:
+        print(r)
+
+    test_ds = tf.data.Dataset.from_tensor_slices((test_path, tf.cast(test_label, tf.int64)))
+    test_ds = test_ds.map(lambda p, l: robust_preprocess(p, l, augment=False), num_parallel_calls=AUTOTUNE)
+    test_ds = test_ds.batch(BATCH_SIZE).prefetch(AUTOTUNE)
+
+    fold = 1
+    fold_results = []
+
+    for model in models:
+        # 予測値と正解ラベルを集める
+        y_true, y_pred = [], []
+        for images, labels in test_ds:
+            preds = model.predict(images)
+            y_true.extend(labels.numpy())
+            y_pred.extend(tf.argmax(preds, axis=1).numpy())
+
+        print(classification_report(y_true, y_pred, digits=4))
+
+        test_metrics = model.evaluate(test_ds, verbose=0)
+        fold_results.append({'fold': fold, 'test_acc': float(test_metrics[1]), 'test_loss': float(test_metrics[0])})
+        print(f"Fold {fold} result: test_acc={test_metrics[1]:.4f},  test_loss={test_metrics[0]:.4f}")
+
+        class_names = [0,1,2,3]
+        visualize_confusion_matrix(model, test_ds, class_names)
+        fold += 1
+    
+    losses = [r['test_loss'] for r in fold_results]
+    accs = [r['test_acc'] for r in fold_results]
+    print("\n=== Test summary ===")
+    print(f"test_acc  mean:{np.mean(accs):.4f}, std:{np.std(accs):.4f}")
+    print(f"test_loss mean:{np.mean(losses):.4f}, std:{np.std(losses):.4f}")
+    # 結果の表示
+    for r in fold_results:
+        print(r)
+
+def main():
+    print(BATCH_SIZE)
+    # 1. 画像パスとラベルを取得
+    all_image_paths = road_image_path(image_dir)
+    data_json = openJson(data_dir)
+
+    print(f"image num: {len(all_image_paths)}")
+
+    # 画像ファイル名（拡張子なし）のリストを作成 例: 12345_a_b.jpg -> 12345
+    image_names = []
+    image_good_names = []
+    for p in all_image_paths:
+        filename = os.path.splitext(os.path.basename(p))[0]  # 拡張子を除去
+        image_names.append(filename)
+
+    paths_bookmarks = SetLabel.get_bookmark(all_image_paths, data_json)
+
+    image_paths, all_image_labels, CLASS_NUM = SetLabel.set_label_all(paths_bookmarks)
+
+    k_fold(image_paths, all_image_labels, CLASS_NUM)
 
 if __name__ == "__main__":
     main()

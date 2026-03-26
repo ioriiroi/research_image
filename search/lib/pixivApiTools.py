@@ -20,9 +20,16 @@ def getNewIllustId(api, word, date) -> int:
 # 指定日の最古のイラストIDを取得
 def getOldIllustId(api, word, date) -> int:
     results = searchIllustData(api, word, "date_asc", date)
+    print(len(results.illusts))
     oldId = results.illusts[0].id
 
     return oldId
+
+def getOldIllustList(api, word, date) -> dict:
+    results = searchIllustData(api, word, "date_asc", date)
+    print(len(results.illusts))
+
+    return results.illusts
 
 def getIllustData(api, illustId) -> json:
     illustData = api.illust_detail(illustId)
